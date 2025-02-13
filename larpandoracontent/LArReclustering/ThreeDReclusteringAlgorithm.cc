@@ -77,8 +77,27 @@ StatusCode ThreeDReclusteringAlgorithm::Run()
         return STATUS_CODE_NOT_FOUND;
     }
 
+    int totalHitsInitial {0};
+    float totalHitEnergyInitial {0.f};
     for (const Pfo *const pShowerPfo : *pShowerPfoList)
     {
+        ClusterList clusters3D;
+        LArPfoHelper::GetThreeDClusterList(pShowerPfo, clusters3D);
+        CaloHitList hits;
+        clusters3D.front()->GetOrderedCaloHitList().FillCaloHitList(hits);
+        totalHitsInitial += hits.size();
+        for (const auto &pHit : hits)
+            totalHitEnergyInitial += pHit->GetMipEquivalentEnergy();
+    }
+    std::cout << " -- Before reclustering --\n" 
+              << "total shower pfos: " << pShowerPfoList->size() << "\n"
+              << "total hits in all shower pfo clusters: " << totalHitsInitial << "\n"
+              << "total hit energy in all shower pfo clusters: " << totalHitEnergyInitial << "\n----\n";
+
+    for (const Pfo *const pShowerPfo : *pShowerPfoList)
+    {
+        std::cout << "Found valid shower pfo\n";
+
         ClusterList clusterList3D;
         LArPfoHelper::GetThreeDClusterList(pShowerPfo, clusterList3D);
 
@@ -95,6 +114,9 @@ StatusCode ThreeDReclusteringAlgorithm::Run()
 
         //Create a variable for the minimum figure of merit and initialize to initial FOM
         float minimumFigureOfMerit(this->GetFigureOfMerit(initialCaloHitList));
+        std::cout << "pfo passes reclustering cut:\n" 
+                  << "FOM = " << minimumFigureOfMerit << "\n"
+                  << "total hits = " << initialCaloHitList.size() << "\n";
 
         //Free the hits in this cluster, so that they are not owned by the original pfo, and are available for reclustering
         PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::RemoveFromPfo(*this, pShowerPfo, clusterList3D.front()));
@@ -110,6 +132,7 @@ StatusCode ThreeDReclusteringAlgorithm::Run()
 
         for (auto *const pTool : m_algorithmToolVector)
         {
+            std::cout << "-- " << pTool->GetType() << ":\n";
             try
             {
                 pTool->Run(initialCaloHitList, newCaloHitListsVector);
@@ -122,13 +145,24 @@ StatusCode ThreeDReclusteringAlgorithm::Run()
 
             //Calculate FOM for this vector of new CaloHitLists
             const float newFigureOfMerit(this->GetFigureOfMerit(newCaloHitListsVector));
+            int totalHits {0}; // sanity check
+            for (const auto &list : newCaloHitListsVector)
+                totalHits += list.size();
+            std::cout << "Total hits = " << totalHits << "\n";
+            std::cout << "Total clusters = " << newCaloHitListsVector.size() << "\n";
+            std::cout << "FOM = " << newFigureOfMerit << "\n";
 
             //Is this FOM smaller?
             if (newFigureOfMerit < minimumFigureOfMerit)
             {
+                std::cout << " < " << minimumFigureOfMerit << " --> " << " this reclustering is better!\n"
+                          << "Replacing clustering with this one\n"
+                          << "Total clusters: " << minimumFigureOfMeritCaloHitListsVector.size() << " --> " << newCaloHitListsVector.size() << "\n";
                 minimumFigureOfMerit = newFigureOfMerit;
                 minimumFigureOfMeritCaloHitListsVector = newCaloHitListsVector;
             }
+            else
+                std::cout << " > " << minimumFigureOfMerit << " --> " << " this reclustering is worse!\n";
             newCaloHitListsVector.clear();
         }
 
@@ -170,6 +204,27 @@ StatusCode ThreeDReclusteringAlgorithm::Run()
 
     //Set current list to be the same as before reclustering
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::ReplaceCurrentList<Pfo>(*this, initialPfoListName));
+
+    const PfoList *pShowerPfoListNew(nullptr);
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, m_pfoListName, pShowerPfoListNew));
+    int totalHitsFinal {0};
+    float totalHitEnergyFinal {0.f};
+    for (const Pfo *const pShowerPfo : *pShowerPfoListNew)
+    {
+        ClusterList clusters3D;
+        LArPfoHelper::GetThreeDClusterList(pShowerPfo, clusters3D);
+        if (clusters3D.size() == 0)
+            continue;
+        CaloHitList hits;
+        clusters3D.front()->GetOrderedCaloHitList().FillCaloHitList(hits);
+        totalHitsFinal += hits.size();
+        for (const auto &pHit : hits)
+            totalHitEnergyFinal += pHit->GetMipEquivalentEnergy();
+    }
+    std::cout << " -- After reclustering --\n" 
+              << "total shower pfos: " << pShowerPfoListNew->size() << "\n"
+              << "total hits in all shower pfo clusters: " << totalHitsFinal << "\n"
+              << "total hit energy in all shower pfo clusters: " << totalHitEnergyFinal << "\n----\n";
 
     return STATUS_CODE_SUCCESS;
 }
