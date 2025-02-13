@@ -32,7 +32,8 @@ public:
     */
     enum FigureOfMeritType
     {
-        CHEATED
+        CHEATED,
+        DUMMY
     };
 
     /**
@@ -120,6 +121,8 @@ private:
      * @return The figure of merit (purity)
      */
     float GetCheatedFigureOfMerit(const pandora::CaloHitList &mergedClusterCaloHitList3D);
+
+    float GetDummyFigureOfMerit();
 
     /**
      *  @brief Select pfos to be reclustered if it passes reclustering criteria

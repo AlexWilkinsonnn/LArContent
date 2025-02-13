@@ -1,5 +1,5 @@
 /**
- *  @file   larpandoracontent/LArReclustering/ThreeDReclusteringAlgorithm.cc
+ *  @file   larpandoracontent/LArReclustering/ThrDUMMDUMMY.cc
  *
  *  @brief  Implementation file for the reclustering algorithm class.
  *
@@ -25,7 +25,7 @@ namespace lar_content
 
 //Figure of merit type enum to string map
 const std::unordered_map<std::string, ThreeDReclusteringAlgorithm::FigureOfMeritType> ThreeDReclusteringAlgorithm::m_stringToEnumMap = {
-    {"cheated", ThreeDReclusteringAlgorithm::FigureOfMeritType::CHEATED}};
+    {"cheated", ThreeDReclusteringAlgorithm::FigureOfMeritType::CHEATED}, {"dummy", ThreeDReclusteringAlgorithm::FigureOfMeritType::DUMMY}};
 
 ThreeDReclusteringAlgorithm::ThreeDReclusteringAlgorithm() :
     m_pfoListName("ShowerParticles3D"),
@@ -478,6 +478,10 @@ float ThreeDReclusteringAlgorithm::GetCheatedFigureOfMerit(const CaloHitList &me
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
+float ThreeDReclusteringAlgorithm::GetDummyFigureOfMerit() { return 1.f; }
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
 float ThreeDReclusteringAlgorithm::GetFigureOfMerit(const std::string &figureOfMeritName, const CaloHitList &mergedClusterCaloHitList3D)
 {
     float figureOfMerit(-999.f);
@@ -491,6 +495,8 @@ float ThreeDReclusteringAlgorithm::GetFigureOfMerit(const std::string &figureOfM
 
     if (figureOfMeritType == FigureOfMeritType::CHEATED)
         figureOfMerit = this->GetCheatedFigureOfMerit(mergedClusterCaloHitList3D);
+    else if (figureOfMeritType == FigureOfMeritType::DUMMY)
+        figureOfMerit = this->GetDummyFigureOfMerit();
     else
         throw pandora::StatusCodeException(pandora::STATUS_CODE_INVALID_PARAMETER);
 
