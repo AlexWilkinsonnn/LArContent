@@ -25,7 +25,8 @@ LongitudinalExtensionAlgorithm::LongitudinalExtensionAlgorithm() :
     m_nodeMaxCosRelativeAngle(0.906f),
     m_emissionMaxLongitudinalDisplacement(15.f),
     m_emissionMaxTransverseDisplacement(2.5f),
-    m_emissionMaxCosRelativeAngle(0.985f)
+    m_emissionMaxCosRelativeAngle(0.985f),
+    m_cheated(false)
 {
 }
 
@@ -79,7 +80,14 @@ void LongitudinalExtensionAlgorithm::FillClusterAssociationMatrix(const ClusterV
             if (clusterI.GetCluster() == clusterJ.GetCluster())
                 continue;
 
-            this->FillClusterAssociationMatrix(clusterI, clusterJ, clusterAssociationMatrix);
+            if (m_cheated)
+            {
+                this->FillClusterAssociationMatrixCheated(clusterI, clusterJ, clusterAssociationMatrix);
+            }
+            else
+            {
+                this->FillClusterAssociationMatrix(clusterI, clusterJ, clusterAssociationMatrix);
+            }
         }
     }
 }
@@ -183,6 +191,121 @@ void LongitudinalExtensionAlgorithm::FillClusterAssociationMatrix(
             ClusterAssociationMap::value_type(pClusterI, ClusterAssociation(vertexTypeJ, vertexTypeI, associationType, clusterLengthI)));
         return;
     }
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+void LongitudinalExtensionAlgorithm::FillClusterAssociationMatrixCheated(
+    const LArPointingCluster &clusterI, const LArPointingCluster &clusterJ, ClusterAssociationMatrix &clusterAssociationMatrix) const
+{
+    // Hardcoded cheating vars
+    const float minPurity {0.8f};
+    const int numNearestCaloHits {10};
+
+    const Cluster *const pClusterI {clusterI.GetCluster()};
+    const Cluster *const pClusterJ {clusterJ.GetCluster()};
+
+    if (pClusterI == pClusterJ)
+        return;
+
+    // Check that new layer occupancy would be reasonable
+    if (LArClusterHelper::GetLayerOccupancy(pClusterI, pClusterJ) < m_clusterMinLayerOccupancy)
+        return;
+
+    // Identify closest pair of vertices
+    LArPointingCluster::Vertex targetVertexI, targetVertexJ;
+    try
+    {
+        LArPointingClusterHelper::GetClosestVertices(clusterI, clusterJ, targetVertexI, targetVertexJ);
+    }
+    catch (StatusCodeException &)
+    {
+        return;
+    }
+    // (Just in case...)
+    if (!(targetVertexI.IsInitialized() && targetVertexJ.IsInitialized()))
+        throw StatusCodeException(STATUS_CODE_FAILURE);
+
+    const CartesianVector &vertexPositionI {targetVertexI.GetPosition()};
+    const CartesianVector &vertexPositionJ {targetVertexJ.GetPosition()};
+
+    // Get the MC particle cluster I looks like near its vertex
+    CaloHitList caloHitsI;
+    pClusterI->GetOrderedCaloHitList().FillCaloHitList(caloHitsI);
+    CaloHitVector caloHitVectorI {caloHitsI.begin(), caloHitsI.end()};
+    std::sort(caloHitVectorI.begin(), caloHitVectorI.end(),
+        [&vertexPositionI](const CaloHit *const pCaloHitA, const CaloHit *const pCaloHitB)
+        {
+            return (pCaloHitA->GetPositionVector() - vertexPositionI).GetMagnitudeSquared() <
+                   (pCaloHitB->GetPositionVector() - vertexPositionI).GetMagnitudeSquared();
+        }); // Ascending order of hit distance to vertex
+    std::map<const MCParticle *, float> mcWeightsI;
+    float totalWeight {0.f};
+    int cntr {0};
+    for (const CaloHit *const pCaloHit : caloHitVectorI)
+    {
+        if (cntr++ > numNearestCaloHits)
+            break;
+
+        const MCParticleWeightMap &weightMap {pCaloHit->GetMCParticleWeightMap()};
+        for (const auto &[pMC, weight] : weightMap)
+        {
+            mcWeightsI[pMC] += weight;
+            totalWeight += weight;
+        }
+    }
+    if (mcWeightsI.empty())
+        return;
+    const MCParticle *pMCI {mcWeightsI.rbegin()->first};
+    if ((mcWeightsI.at(pMCI) / totalWeight) < minPurity)
+        return;
+    
+    // Get the MC particle cluster J looks like near its vertex
+    CaloHitList caloHitsJ;
+    pClusterJ->GetOrderedCaloHitList().FillCaloHitList(caloHitsJ);
+    CaloHitVector caloHitVectorJ {caloHitsJ.begin(), caloHitsJ.end()};
+    std::sort(caloHitVectorJ.begin(), caloHitVectorJ.end(),
+        [&vertexPositionJ](const CaloHit *const pCaloHitA, const CaloHit *const pCaloHitB)
+        {
+            return (pCaloHitA->GetPositionVector() - vertexPositionJ).GetMagnitudeSquared() <
+                   (pCaloHitB->GetPositionVector() - vertexPositionJ).GetMagnitudeSquared();
+        }); // Ascending order of hit distance to vertex
+    std::map<const MCParticle *, float> mcWeightsJ;
+    totalWeight = {0.f};
+    cntr = {0};
+    for (const CaloHit *const pCaloHit : caloHitVectorJ)
+    {
+        if (cntr++ > numNearestCaloHits)
+            break;
+
+        const MCParticleWeightMap &weightMap {pCaloHit->GetMCParticleWeightMap()};
+        for (const auto &[pMC, weight] : weightMap)
+        {
+            mcWeightsJ[pMC] += weight;
+            totalWeight += weight;
+        }
+    }
+    if (mcWeightsJ.empty())
+        return;
+    const MCParticle *pMCJ {mcWeightsJ.rbegin()->first};
+    if ((mcWeightsJ.at(pMCJ) / totalWeight) < minPurity)
+        return;
+
+    // Make association if MC Particles match
+    if (pMCI != pMCJ)
+        return;
+
+    const ClusterAssociation::VertexType vertexTypeI {
+        targetVertexI.IsInnerVertex() ? ClusterAssociation::INNER : ClusterAssociation::OUTER};
+    const ClusterAssociation::VertexType vertexTypeJ {
+        targetVertexJ.IsInnerVertex() ? ClusterAssociation::INNER : ClusterAssociation::OUTER};
+    ClusterAssociation::AssociationType associationType {ClusterAssociation::STRONG};
+    const float clusterLengthI {LArPointingClusterHelper::GetLength(clusterI)};
+    const float clusterLengthJ {LArPointingClusterHelper::GetLength(clusterJ)};
+    (void)clusterAssociationMatrix[pClusterI].insert(
+        ClusterAssociationMap::value_type(pClusterJ, ClusterAssociation(vertexTypeI, vertexTypeJ, associationType, clusterLengthJ)));
+    (void)clusterAssociationMatrix[pClusterJ].insert(
+        ClusterAssociationMap::value_type(pClusterI, ClusterAssociation(vertexTypeJ, vertexTypeI, associationType, clusterLengthI)));
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -389,6 +512,9 @@ StatusCode LongitudinalExtensionAlgorithm::ReadSettings(const TiXmlHandle xmlHan
 
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "EmissionMaxCosRelativeAngle", m_emissionMaxCosRelativeAngle));
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "Cheated", m_cheated));
 
     return ClusterExtensionAlgorithm::ReadSettings(xmlHandle);
 }

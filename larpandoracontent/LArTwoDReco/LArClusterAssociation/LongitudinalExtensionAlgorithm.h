@@ -41,6 +41,9 @@ private:
     void FillClusterAssociationMatrix(
         const LArPointingCluster &clusterI, const LArPointingCluster &clusterJ, ClusterAssociationMatrix &clusterAssociationMatrix) const;
 
+    void FillClusterAssociationMatrixCheated(
+        const LArPointingCluster &clusterI, const LArPointingCluster &clusterJ, ClusterAssociationMatrix &clusterAssociationMatrix) const;
+
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
 
     float m_clusterMinLength;                    ///<
@@ -50,6 +53,7 @@ private:
     float m_emissionMaxLongitudinalDisplacement; ///<
     float m_emissionMaxTransverseDisplacement;   ///<
     float m_emissionMaxCosRelativeAngle;         ///<
+    bool m_cheated;                              ///<
 };
 
 } // namespace lar_content
