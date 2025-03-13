@@ -57,6 +57,9 @@ private:
     bool AreClustersAssociated(const pandora::CartesianVector &innerClusterEnd, const pandora::CartesianVector &outerClusterStart,
         const pandora::ClusterFitResult &innerFit, const pandora::ClusterFitResult &outerFit) const;
 
+    // -- Cheating stuff
+    bool AreClustersAssociatedCheated(const pandora::Cluster *const pInnerCluster, const pandora::Cluster *const pOuterCluster) const;
+
     unsigned int m_minClusterLayers;     ///< minimum allowed number of layers for a clean cluster
     unsigned int m_maxGapLayers;         ///< maximum allowed number of layers between associated clusters
     unsigned int m_fitLayers;            ///< number of layers to fit at start and end of cluster
@@ -67,6 +70,9 @@ private:
     float m_hitSizeZ;                    ///< estimated hit size in z (wire number) dimension, units cm
     float m_hitSizeX;                    ///< estimated hit size in x (drift time) dimension, units cm
     mutable pandora::HitType m_view;     ///< The view to which the hits under consideration belong
+
+    // -- Cheating stuff
+    bool m_cheated;                                                                     ///< whether to cheat the association using truth
 };
 
 } // namespace lar_content
