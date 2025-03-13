@@ -28,7 +28,8 @@ LongitudinalAssociationAlgorithm::LongitudinalAssociationAlgorithm() :
     m_maxLongitudinalDisplacement(2.f),
     m_hitSizeZ(0.3f),
     m_hitSizeX(0.5f),
-    m_view(TPC_3D)
+    m_view(TPC_3D),
+    m_cheated(false)
 {
 }
 
@@ -128,6 +129,9 @@ bool LongitudinalAssociationAlgorithm::AreClustersAssociated(const Cluster *cons
     if ((innerEndCentroid - outerStartCentroid).GetMagnitudeSquared() > maxGapDistanceSquaredAdjusted)
         return false;
 
+    if (m_cheated)
+        return this->AreClustersAssociatedCheated(pInnerCluster, pOuterCluster);
+
     ClusterFitResult innerEndFit, outerStartFit;
     PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, ClusterFitHelper::FitEnd(pInnerCluster, m_fitLayers, innerEndFit));
     PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, ClusterFitHelper::FitStart(pOuterCluster, m_fitLayers, outerStartFit));
@@ -141,7 +145,7 @@ bool LongitudinalAssociationAlgorithm::AreClustersAssociated(const Cluster *cons
 //------------------------------------------------------------------------------------------------------------------------------------------
 
 bool LongitudinalAssociationAlgorithm::AreClustersAssociated(const CartesianVector &innerClusterEnd,
-    const CartesianVector &outerClusterStart, const ClusterFitResult &innerFit, const ClusterFitResult &outerFit) const
+        const CartesianVector &outerClusterStart, const ClusterFitResult &innerFit, const ClusterFitResult &outerFit) const
 {
     if (!innerFit.IsFitSuccessful() || !outerFit.IsFitSuccessful())
         return false;
@@ -154,40 +158,102 @@ bool LongitudinalAssociationAlgorithm::AreClustersAssociated(const CartesianVect
     const float maxLongitudinalDisplacementAdjusted{ratio * m_maxLongitudinalDisplacement};
 
     const CartesianVector innerEndFit1(
-        innerFit.GetIntercept() + innerFit.GetDirection() * (innerFit.GetDirection().GetDotProduct(innerClusterEnd - innerFit.GetIntercept())));
+            innerFit.GetIntercept() + innerFit.GetDirection() * (innerFit.GetDirection().GetDotProduct(innerClusterEnd - innerFit.GetIntercept())));
     const CartesianVector innerEndFit2(
-        outerFit.GetIntercept() + outerFit.GetDirection() * (outerFit.GetDirection().GetDotProduct(innerClusterEnd - outerFit.GetIntercept())));
+            outerFit.GetIntercept() + outerFit.GetDirection() * (outerFit.GetDirection().GetDotProduct(innerClusterEnd - outerFit.GetIntercept())));
 
     const CartesianVector outerStartFit1(outerFit.GetIntercept() +
-        outerFit.GetDirection() * (outerFit.GetDirection().GetDotProduct(outerClusterStart - outerFit.GetIntercept())));
+            outerFit.GetDirection() * (outerFit.GetDirection().GetDotProduct(outerClusterStart - outerFit.GetIntercept())));
     const CartesianVector outerStartFit2(innerFit.GetIntercept() +
-        innerFit.GetDirection() * (innerFit.GetDirection().GetDotProduct(outerClusterStart - innerFit.GetIntercept())));
+            innerFit.GetDirection() * (innerFit.GetDirection().GetDotProduct(outerClusterStart - innerFit.GetIntercept())));
 
     const CartesianVector clusterSeparation(outerClusterStart - innerClusterEnd);
 
     if ((std::fabs(clusterSeparation.GetX()) < m_hitSizeX * maxTransverseDisplacementAdjusted) &&
-        (std::fabs(clusterSeparation.GetZ()) < m_hitSizeZ * maxLongitudinalDisplacementAdjusted))
+            (std::fabs(clusterSeparation.GetZ()) < m_hitSizeZ * maxLongitudinalDisplacementAdjusted))
         return true;
 
     const CartesianVector fittedSeparation(outerStartFit1 - innerEndFit1);
 
     if ((std::fabs(fittedSeparation.GetX()) < m_hitSizeX * maxTransverseDisplacementAdjusted) &&
-        (std::fabs(fittedSeparation.GetZ()) < m_hitSizeZ * maxLongitudinalDisplacementAdjusted))
+            (std::fabs(fittedSeparation.GetZ()) < m_hitSizeZ * maxLongitudinalDisplacementAdjusted))
         return true;
 
     const CartesianVector fittedInnerSeparation(innerEndFit2 - innerEndFit1);
 
     if ((std::fabs(fittedInnerSeparation.GetX()) < m_hitSizeX * maxTransverseDisplacementAdjusted) &&
-        (std::fabs(fittedInnerSeparation.GetZ()) < m_hitSizeZ * maxLongitudinalDisplacementAdjusted))
+            (std::fabs(fittedInnerSeparation.GetZ()) < m_hitSizeZ * maxLongitudinalDisplacementAdjusted))
         return true;
 
     const CartesianVector fittedOuterSeparation(outerStartFit2 - outerStartFit1);
 
     if ((std::fabs(fittedOuterSeparation.GetX()) < m_hitSizeX * maxTransverseDisplacementAdjusted) &&
-        (std::fabs(fittedOuterSeparation.GetZ()) < m_hitSizeZ * maxLongitudinalDisplacementAdjusted))
+            (std::fabs(fittedOuterSeparation.GetZ()) < m_hitSizeZ * maxLongitudinalDisplacementAdjusted))
         return true;
 
     return false;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+bool LongitudinalAssociationAlgorithm::AreClustersAssociatedCheated(const Cluster *const pInnerCluster,
+                                                                    const Cluster *const pOuterCluster) const
+{
+    const float minPurity {0.8f};
+    const int windowLayerSize {5};
+
+    if ((pInnerCluster->GetOrderedCaloHitList().size() < 2) || (pOuterCluster->GetOrderedCaloHitList().size() < 2))
+        return false;
+
+    std::map<const MCParticle *, float> innerClusterOuterMCWeights;
+    float totalWeight {0.f};
+    for (const auto &[layer, pCaloHits] : pInnerCluster->GetOrderedCaloHitList())
+    {
+        if (layer + windowLayerSize <= pInnerCluster->GetOuterPseudoLayer())
+            continue;
+    
+        for (const CaloHit *const pCaloHit : *pCaloHits)
+        {
+            const MCParticleWeightMap &weightMap {pCaloHit->GetMCParticleWeightMap()};
+            for (const auto &[pMC, weight] : weightMap)
+            {
+                innerClusterOuterMCWeights[pMC] += weight;
+                totalWeight += weight;
+            }
+        }
+    }
+    if (innerClusterOuterMCWeights.empty())
+        return false;
+
+    const MCParticle *pOuterMC {innerClusterOuterMCWeights.rbegin()->first}; // STL map is sorted with largest val at the end
+    if ((innerClusterOuterMCWeights.at(pOuterMC) / totalWeight) < minPurity)
+        return false;
+
+    totalWeight = 0.f;
+    float sameMCWeight {0.f};
+    for (const auto &[layer, pCaloHits] : pOuterCluster->GetOrderedCaloHitList())
+    {
+        if (layer <= pInnerCluster->GetOuterPseudoLayer() || layer > pInnerCluster->GetOuterPseudoLayer() + windowLayerSize)
+            continue;
+        
+        for (const CaloHit *const pCaloHit : *pCaloHits)
+        {
+            const MCParticleWeightMap &weightMap {pCaloHit->GetMCParticleWeightMap()};
+            for (const auto &[pMC, weight] : weightMap)
+            {
+                if (pMC == pOuterMC)
+                    sameMCWeight += weight;
+                totalWeight += weight;
+            }
+        }
+    }
+    if (totalWeight == 0.f)
+        return false;
+
+    if ((sameMCWeight / totalWeight) <= minPurity)
+        return false;
+
+    return true;
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -217,6 +283,8 @@ StatusCode LongitudinalAssociationAlgorithm::ReadSettings(const TiXmlHandle xmlH
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "HitSizeZ", m_hitSizeZ));
 
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "HitSizeX", m_hitSizeX));
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "Cheated", m_cheated));
 
     return ClusterAssociationAlgorithm::ReadSettings(xmlHandle);
 }
