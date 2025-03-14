@@ -29,7 +29,8 @@ LongitudinalAssociationAlgorithm::LongitudinalAssociationAlgorithm() :
     m_hitSizeZ(0.3f),
     m_hitSizeX(0.5f),
     m_view(TPC_3D),
-    m_cheated(false)
+    m_cheated(false),
+    m_cheatedWindowLayerSize(5)
 {
 }
 
@@ -199,8 +200,8 @@ bool LongitudinalAssociationAlgorithm::AreClustersAssociated(const CartesianVect
 bool LongitudinalAssociationAlgorithm::AreClustersAssociatedCheated(const Cluster *const pInnerCluster,
                                                                     const Cluster *const pOuterCluster) const
 {
+    // Hardcoded
     const float minPurity {0.8f};
-    const int windowLayerSize {5};
 
     if ((pInnerCluster->GetOrderedCaloHitList().size() < 2) || (pOuterCluster->GetOrderedCaloHitList().size() < 2))
         return false;
@@ -209,7 +210,7 @@ bool LongitudinalAssociationAlgorithm::AreClustersAssociatedCheated(const Cluste
     float totalWeight {0.f};
     for (const auto &[layer, pCaloHits] : pInnerCluster->GetOrderedCaloHitList())
     {
-        if (layer + windowLayerSize <= pInnerCluster->GetOuterPseudoLayer())
+        if (layer + m_cheatedWindowLayerSize <= pInnerCluster->GetOuterPseudoLayer())
             continue;
     
         for (const CaloHit *const pCaloHit : *pCaloHits)
@@ -233,7 +234,7 @@ bool LongitudinalAssociationAlgorithm::AreClustersAssociatedCheated(const Cluste
     float sameMCWeight {0.f};
     for (const auto &[layer, pCaloHits] : pOuterCluster->GetOrderedCaloHitList())
     {
-        if (layer <= pInnerCluster->GetOuterPseudoLayer() || layer > pInnerCluster->GetOuterPseudoLayer() + windowLayerSize)
+        if (layer <= pInnerCluster->GetOuterPseudoLayer() || layer > pInnerCluster->GetOuterPseudoLayer() + m_cheatedWindowLayerSize)
             continue;
         
         for (const CaloHit *const pCaloHit : *pCaloHits)
@@ -284,7 +285,10 @@ StatusCode LongitudinalAssociationAlgorithm::ReadSettings(const TiXmlHandle xmlH
 
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "HitSizeX", m_hitSizeX));
 
-    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "Cheated", m_cheated));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle,
+        "Cheated", m_cheated));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle,
+        "CheatedWindowLayerSize", m_cheatedWindowLayerSize));
 
     return ClusterAssociationAlgorithm::ReadSettings(xmlHandle);
 }
