@@ -72,7 +72,8 @@ private:
     mutable pandora::HitType m_view;     ///< The view to which the hits under consideration belong
 
     // -- Cheating stuff
-    bool m_cheated;                                                                     ///< whether to cheat the association using truth
+    bool m_cheated;                ///< whether to cheat the association using truth
+    int m_cheatedWindowLayerSize; ///< number of layers from cluster outer/inner layers to consider for true MC particle
 };
 
 } // namespace lar_content
