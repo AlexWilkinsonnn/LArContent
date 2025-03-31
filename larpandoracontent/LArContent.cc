@@ -215,6 +215,8 @@
 
 #include "larpandoracontent/LArTwoDReco/TwoDParticleCreationAlgorithm.h"
 
+#include "larpandoracontent/LArTwoDReco/CheatedTwoDClusteringAlgorithm.h"
+
 #include "larpandoracontent/LArUtility/InteractionSelectionAlgorithm.h"
 #include "larpandoracontent/LArUtility/ListChangingAlgorithm.h"
 #include "larpandoracontent/LArUtility/ListDeletionAlgorithm.h"
@@ -337,6 +339,7 @@
     d("LArTrackConsolidation",                  TrackConsolidationAlgorithm)                                                    \
     d("LArVertexSplitting",                     VertexSplittingAlgorithm)                                                       \
     d("LArTwoDParticleCreation",                TwoDParticleCreationAlgorithm)                                                  \
+    d("LArCheatedTwoDClustering",               CheatedTwoDClusteringAlgorithm)                                                 \
     d("LArInteractionSelection",                InteractionSelectionAlgorithm)                                                  \
     d("LArListChanging",                        ListChangingAlgorithm)                                                          \
     d("LArListDeletion",                        ListDeletionAlgorithm)                                                          \
