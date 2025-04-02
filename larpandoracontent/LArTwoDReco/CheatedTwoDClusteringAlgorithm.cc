@@ -39,7 +39,6 @@ StatusCode CheatedTwoDClusteringAlgorithm::Run()
     std::vector<PandoraContentApi::Cluster::Parameters> originalClusterParams;
     ClusterList clusters;
     clusters.insert(clusters.begin(), pClusters->begin(), pClusters->end());
-    std::cout << clusters.size() << " original clusters\n";
     for (const Cluster *const pCluster : clusters)
     {
         CaloHitList caloHits;
@@ -94,9 +93,6 @@ StatusCode CheatedTwoDClusteringAlgorithm::Run()
             originalClusterParams.emplace_back(originalParams);
         }
     }
-
-    std::cout << mcToClusterParams.size() << " new clusters from MC particles\n";
-    std::cout << originalClusterParams.size() << " original clusters remaining (likely with hits removed) \n";
 
     std::string tempListName;
     const ClusterList *pTempClusters{nullptr};
