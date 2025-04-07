@@ -43,7 +43,8 @@ EventClusterValidationAlgorithm::ClusterMetrics::ClusterMetrics() :
 EventClusterValidationAlgorithm::EventClusterValidationAlgorithm() :
     m_eventNumber{0},
     m_caloHitListName{"CaloHitList2D"},
-    m_minMCHitsPerView{0}
+    m_minMCHitsPerView{0},
+    m_onlyRandIndex{false}
 {
 }
 
@@ -84,7 +85,9 @@ StatusCode EventClusterValidationAlgorithm::Run()
         }
     }
 
-    const std::vector<ValidationType> valTypes{ValidationType::ALL, ValidationType::SHOWER, ValidationType::TRACK};
+    const std::vector<ValidationType> valTypes{(m_onlyRandIndex ?
+            std::vector<ValidationType>{ValidationType::ALL} :
+            std::vector<ValidationType>{ValidationType::ALL, ValidationType::SHOWER, ValidationType::TRACK})};
     for (const auto &[view, caloHits] : viewToCaloHits)
     {
         const ClusterList &clusters{viewToClusters[view]};
@@ -139,7 +142,10 @@ void EventClusterValidationAlgorithm::GetHitParents(
         for (const auto &[pMC, weight] : weightMap)
         {
             if (weight > maxWeight)
+            {
                 pMainMC = pMC;
+                maxWeight = weight;
+            }
         }
         if (pMainMC)
         {
@@ -212,6 +218,12 @@ std::map<const CaloHit *const, EventClusterValidationAlgorithm::CaloHitParents> 
 
 void EventClusterValidationAlgorithm::GetMetrics(const std::map<const CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const
 {
+    if (m_onlyRandIndex)
+    {
+        metrics.m_nHits = hitParents.size();
+        return;
+    }
+
     // Adapted from Andy's code for calculating cluster purity and completeness (ClusterValidationAlgorithm)
     std::set<const Cluster *> validClusters;
     std::set<const MCParticle *> validMCParticles;
@@ -307,7 +319,9 @@ float EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *con
 void EventClusterValidationAlgorithm::SetBranches(
     [[maybe_unused]] ClusterMetrics &metrics, [[maybe_unused]] float randIndex, [[maybe_unused]] std::string branchPrefix) const
 {
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "adjusted_rand_idx", randIndex));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "n_hits", metrics.m_nHits));
+    if (m_onlyRandIndex) { return; }
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "n_clusters", metrics.m_nClusters));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "n_mainMCs", metrics.m_nMainMCs));
 #ifdef MONITORING
@@ -322,7 +336,6 @@ void EventClusterValidationAlgorithm::SetBranches(
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "mean_purity", meanPurity));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "mean_completeness", meanCompleteness));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "mean_n_reco_hits", meanNRecoHits));
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "adjusted_rand_idx", randIndex));
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -335,6 +348,8 @@ StatusCode EventClusterValidationAlgorithm::ReadSettings(const TiXmlHandle xmlHa
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "ClusterListNames", m_clusterListNames));
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "MinMCHitsPerView", m_minMCHitsPerView));
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "OnlyRandIndex", m_onlyRandIndex));
 
     return STATUS_CODE_SUCCESS;
 }
