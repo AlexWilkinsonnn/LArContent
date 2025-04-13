@@ -42,7 +42,7 @@ EventClusterValidationAlgorithm::ClusterMetrics::ClusterMetrics() :
 
 EventClusterValidationAlgorithm::EventClusterValidationAlgorithm() :
     m_eventNumber{0},
-    m_caloHitListNames{"CaloHitList2D"},
+    m_caloHitListNames{ { "CaloHitList2D" } },
     m_minMCHitsPerView{0},
     m_onlyRandIndices{false},
     m_onlyRandIndex{false}
@@ -67,11 +67,16 @@ StatusCode EventClusterValidationAlgorithm::Run()
     m_eventNumber++;
 
     // Gather hits by view
-    const CaloHitList *pFullCaloHitList{nullptr};
-    PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, m_caloHitListNames, pFullCaloHitList));
     std::map<HitType, CaloHitList> viewToCaloHits;
-    for (const CaloHit *const pCaloHit : *pFullCaloHitList)
-        viewToCaloHits[pCaloHit->GetHitType()].emplace_back(pCaloHit);
+    for (std::string listName : m_caloHitListNames)
+    {
+      const CaloHitList *pCaloHitList{nullptr};
+      PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, listName, pCaloHitList));
+      for (const CaloHit *const pCaloHit : *pCaloHitList)
+      {
+          viewToCaloHits[pCaloHit->GetHitType()].emplace_back(pCaloHit);
+      }
+    }
 
     // Gather clusters by view
     std::map<HitType, ClusterList> viewToClusters;
@@ -345,8 +350,12 @@ StatusCode EventClusterValidationAlgorithm::ReadSettings(const TiXmlHandle xmlHa
 {
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "FileName", m_fileName));
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "TreeName", m_treeName));
-    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "CaloHitListNames", m_caloHitListNames));
+
+    std::vector<std::string> caloHitListNames;
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "CaloHitListNames", caloHitListNames));
+    if (!caloHitListNames.empty()) { m_caloHitListNames = caloHitListNames; }
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "ClusterListNames", m_clusterListNames));
+
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "MinMCHitsPerView", m_minMCHitsPerView));
     PANDORA_RETURN_RESULT_IF_AND_IF(
