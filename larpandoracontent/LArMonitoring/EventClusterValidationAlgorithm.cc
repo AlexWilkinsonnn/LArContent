@@ -42,8 +42,9 @@ EventClusterValidationAlgorithm::ClusterMetrics::ClusterMetrics() :
 
 EventClusterValidationAlgorithm::EventClusterValidationAlgorithm() :
     m_eventNumber{0},
-    m_caloHitListName{"CaloHitList2D"},
+    m_caloHitListNames{"CaloHitList2D"},
     m_minMCHitsPerView{0},
+    m_onlyRandIndices{false},
     m_onlyRandIndex{false}
 {
 }
@@ -67,7 +68,7 @@ StatusCode EventClusterValidationAlgorithm::Run()
 
     // Gather hits by view
     const CaloHitList *pFullCaloHitList{nullptr};
-    PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, m_caloHitListName, pFullCaloHitList));
+    PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, m_caloHitListNames, pFullCaloHitList));
     std::map<HitType, CaloHitList> viewToCaloHits;
     for (const CaloHit *const pCaloHit : *pFullCaloHitList)
         viewToCaloHits[pCaloHit->GetHitType()].emplace_back(pCaloHit);
@@ -218,7 +219,7 @@ std::map<const CaloHit *const, EventClusterValidationAlgorithm::CaloHitParents> 
 
 void EventClusterValidationAlgorithm::GetMetrics(const std::map<const CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const
 {
-    if (m_onlyRandIndex)
+    if (m_onlyRandIndex || m_onlyRandIndices)
     {
         metrics.m_nHits = hitParents.size();
         return;
@@ -321,7 +322,7 @@ void EventClusterValidationAlgorithm::SetBranches(
 {
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "adjusted_rand_idx", randIndex));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "n_hits", metrics.m_nHits));
-    if (m_onlyRandIndex) { return; }
+    if (m_onlyRandIndex || m_onlyRandIndices) { return; }
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "n_clusters", metrics.m_nClusters));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "n_mainMCs", metrics.m_nMainMCs));
 #ifdef MONITORING
@@ -344,10 +345,12 @@ StatusCode EventClusterValidationAlgorithm::ReadSettings(const TiXmlHandle xmlHa
 {
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "FileName", m_fileName));
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "TreeName", m_treeName));
-    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "CaloHitListName", m_caloHitListName));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "CaloHitListNames", m_caloHitListNames));
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "ClusterListNames", m_clusterListNames));
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "MinMCHitsPerView", m_minMCHitsPerView));
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "OnlyRandIndices", m_onlyRandIndices));
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "OnlyRandIndex", m_onlyRandIndex));
 
