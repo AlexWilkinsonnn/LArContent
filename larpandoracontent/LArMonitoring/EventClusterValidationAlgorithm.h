@@ -117,9 +117,11 @@ private:
     int m_eventNumber;                           ///< To track the current event number
     std::string m_fileName;                      ///< The filename of the ROOT output file
     std::string m_treeName;                      ///< The name of the ROOT tree
-    std::string m_caloHitListName;               ///< The name of the hit list containing all 2D hits
+    std::vector<std::string> m_caloHitListNames; ///< The names of the hit lists containing all 2D hits
     std::vector<std::string> m_clusterListNames; ///< The names of the lists of 2D clusters to process
     int m_minMCHitsPerView; ///< Threshold on total main MCParticle hits in each view for consideration in metric calculations
+    bool m_onlyRandIndices;                      ///< Flag to only calculate the ajusted rand index for track/shower/all particles
+    bool m_onlyRandIndex;                        ///< Flag to only calculate the ajusted rand index over all particles
 };
 
 } // namespace lar_content
