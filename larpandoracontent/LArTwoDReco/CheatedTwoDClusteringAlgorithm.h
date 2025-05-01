@@ -30,6 +30,12 @@ public:
     ~CheatedTwoDClusteringAlgorithm() = default;
 
 private:
+    pandora::StatusCode ReturnHitToOriginalCluster(
+        const pandora::CaloHit *const pCaloHit,
+        const pandora::CaloHitList &origCaloHits,
+        const pandora::CaloHitList &origIsoCaloHits,
+        PandoraContentApi::Cluster::Parameters &origClusterParams) const;
+
     pandora::StatusCode Run();
 
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
@@ -37,6 +43,7 @@ private:
     std::string m_clusterListName; ///< Name of input cluster list
     bool m_showerParticlesOnly;    ///< Only cheat clustering of hits associated with true shower particles
     bool m_trackParticlesOnly;     ///< Only cheat clustering of hits associated with true track particles
+    bool m_foldShowers;            ///< Fold shower MCParticles into their leading MCParticle
 };
 
 } // namespace lar_content

@@ -15,7 +15,8 @@ namespace lar_content
 
 CheatedTwoDClusteringAlgorithm::CheatedTwoDClusteringAlgorithm() :
     m_showerParticlesOnly{false},
-    m_trackParticlesOnly{false}
+    m_trackParticlesOnly{false},
+    m_foldShowers{false}
 {
 }
 
@@ -30,7 +31,7 @@ StatusCode CheatedTwoDClusteringAlgorithm::Run()
     {
         if (PandoraContentApi::GetSettings(*this)->ShouldDisplayAlgorithmInfo())
         {
-            std::cout << "ClusterMergingAlgorithm: unable to find cluster list " << m_clusterListName << std::endl;
+            std::cout << "CheatedTwoDClusteringAlgorithm: unable to find cluster list " << m_clusterListName << std::endl;
         }
         return STATUS_CODE_SUCCESS;
     }
@@ -62,28 +63,18 @@ StatusCode CheatedTwoDClusteringAlgorithm::Run()
                     maxWeight = weight;
                 }
             }
+
+            if (!pMainMC) { this->ReturnHitToOriginalCluster(pCaloHit, caloHits, isoCaloHits, originalParams); }
             
-            if (!pMainMC ||
-                (m_showerParticlesOnly && (std::abs(pMainMC->GetParticleId()) != PHOTON && std::abs(pMainMC->GetParticleId()) != E_MINUS)) ||
-                (m_trackParticlesOnly && (std::abs(pMainMC->GetParticleId()) == PHOTON || std::abs(pMainMC->GetParticleId()) == E_MINUS)))
-            {
-                if (std::find(caloHits.begin(), caloHits.end(), pCaloHit) != caloHits.end())
-                {
-                    originalParams.m_caloHitList.push_back(pCaloHit);
-                }
-                else if (std::find(isoCaloHits.begin(), isoCaloHits.end(), pCaloHit) != isoCaloHits.end())
-                {
-                    originalParams.m_isolatedCaloHitList.push_back(pCaloHit);
-                }
-                else
-                {
-                    return STATUS_CODE_FAILURE;
-                }
+            const bool isShower {(std::abs(pMainMC->GetParticleId()) == PHOTON || std::abs(pMainMC->GetParticleId()) == E_MINUS)};
+
+            if ((m_showerParticlesOnly && !isShower) || (m_trackParticlesOnly && isShower))
+            { 
+                this->ReturnHitToOriginalCluster(pCaloHit, caloHits, isoCaloHits, originalParams);
+                continue;
             }
-            else
-            {
-                mcToClusterParams[pMainMC].m_caloHitList.push_back(pCaloHit);
-            }
+
+            mcToClusterParams[pMainMC].m_caloHitList.push_back(pCaloHit);
         }
 
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::Delete(*this, pCluster, m_clusterListName));
@@ -113,6 +104,29 @@ StatusCode CheatedTwoDClusteringAlgorithm::Run()
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
+StatusCode CheatedTwoDClusteringAlgorithm::ReturnHitToOriginalCluster(
+    const CaloHit *const pCaloHit,
+    const CaloHitList &origCaloHits,
+    const CaloHitList &origIsoCaloHits,
+    PandoraContentApi::Cluster::Parameters &origClusterParams) const
+{
+    if (std::find(origCaloHits.begin(), origCaloHits.end(), pCaloHit) != origCaloHits.end())
+    {
+        origClusterParams.m_caloHitList.push_back(pCaloHit);
+    }
+    else if (std::find(origIsoCaloHits.begin(), origIsoCaloHits.end(), pCaloHit) != origIsoCaloHits.end())
+    {
+        origClusterParams.m_isolatedCaloHitList.push_back(pCaloHit);
+    }
+    else
+    {
+        return STATUS_CODE_FAILURE;
+    }
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode CheatedTwoDClusteringAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
 {
@@ -123,6 +137,8 @@ StatusCode CheatedTwoDClusteringAlgorithm::ReadSettings(const TiXmlHandle xmlHan
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "TrackParticlesOnly", m_trackParticlesOnly))
     if (m_showerParticlesOnly && m_trackParticlesOnly) { return STATUS_CODE_INVALID_PARAMETER; }
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "FoldShowers", m_foldShowers))
 
     return STATUS_CODE_SUCCESS;
 }
