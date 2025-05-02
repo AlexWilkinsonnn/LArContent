@@ -16,7 +16,9 @@ namespace lar_content
 CheatedTwoDClusteringAlgorithm::CheatedTwoDClusteringAlgorithm() :
     m_showerParticlesOnly{false},
     m_trackParticlesOnly{false},
-    m_foldShowers{false}
+    m_leadingShowerMCIsTrack{false},
+    m_ignoreOverlappingDeltaRays{false},
+    m_foldToLeadingShower{false}
 {
 }
 
@@ -24,6 +26,15 @@ CheatedTwoDClusteringAlgorithm::CheatedTwoDClusteringAlgorithm() :
 
 StatusCode CheatedTwoDClusteringAlgorithm::Run()
 {
+    if (PandoraContentApi::GetSettings(*this)->ShouldDisplayAlgorithmInfo())
+    {
+        if (m_leadingShowerMCIsTrack)
+        {
+            std::cout << "CheatedTwoDClusteringAlgorithm: "
+                      << "treating leading shower MC particle as a track, expect the MC EM particles to not be rolled-up\n";
+        }
+    }
+
     const ClusterList *pClusters {nullptr};
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_INITIALIZED, !=,
         PandoraContentApi::GetList(*this, m_clusterListName, pClusters));
@@ -34,6 +45,12 @@ StatusCode CheatedTwoDClusteringAlgorithm::Run()
             std::cout << "CheatedTwoDClusteringAlgorithm: unable to find cluster list " << m_clusterListName << std::endl;
         }
         return STATUS_CODE_SUCCESS;
+    }
+
+    if (m_leadingShowerMCIsTrack && PandoraContentApi::GetSettings(*this)->ShouldDisplayAlgorithmInfo())
+    {
+        std::cout << "CheatedTwoDClusteringAlgorithm: "
+                  << "treating leading shower MC particle as a track, expect the MC particle information to not be rolled-up\n";
     }
 
     std::map<const MCParticle *const, PandoraContentApi::Cluster::Parameters> mcToClusterParams;
@@ -64,14 +81,48 @@ StatusCode CheatedTwoDClusteringAlgorithm::Run()
                 }
             }
 
-            if (!pMainMC) { this->ReturnHitToOriginalCluster(pCaloHit, caloHits, isoCaloHits, originalParams); }
+            if (!pMainMC)
+            {
+                this->ReturnHitToOriginalCluster(pCaloHit, caloHits, isoCaloHits, originalParams);
+                continue;
+            }
+
+            const MCParticle *pMainParentMC{nullptr};
+            if (m_ignoreOverlappingDeltaRays && this->ProbablyDeltaRay(pMainMC, pMainParentMC))
+            {
+                if ((pMainMC->GetVertex() - pMainMC->GetEndpoint()).GetMagnitudeSquared() < pow(4.67 / 2, 2)) // half a wire pitch
+                {
+                    pMainMC = pMainParentMC;
+                }
+                else
+                {
+                    float mainParentWeight{std::numeric_limits<float>::lowest()};
+                    for (const auto &[pMC, weight] : weightMap)
+                    {
+                        if (pMC == pMainParentMC)
+                        {
+                            mainParentWeight = weight;
+                            break;
+                        }
+                    }
+                    if (mainParentWeight > 0.02f) // Arbitrary threshold for "non-negligible" contributio not the hit
+                    {
+                        pMainMC = pMainParentMC;
+                    }
+                }
+            }
             
-            const bool isShower {(std::abs(pMainMC->GetParticleId()) == PHOTON || std::abs(pMainMC->GetParticleId()) == E_MINUS)};
+            const bool isShower {this->IsShower(pMainMC)};
 
             if ((m_showerParticlesOnly && !isShower) || (m_trackParticlesOnly && isShower))
             { 
                 this->ReturnHitToOriginalCluster(pCaloHit, caloHits, isoCaloHits, originalParams);
                 continue;
+            }
+
+            if (m_foldToLeadingShower && isShower)
+            {
+                pMainMC = this->FindLeadingShowerMC(pMainMC);
             }
 
             mcToClusterParams[pMainMC].m_caloHitList.push_back(pCaloHit);
@@ -128,6 +179,65 @@ StatusCode CheatedTwoDClusteringAlgorithm::ReturnHitToOriginalCluster(
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
+bool CheatedTwoDClusteringAlgorithm::IsShower(const MCParticle *const pMC) const
+{
+    if (!m_leadingShowerMCIsTrack)
+    {
+        return (std::abs(pMC->GetParticleId()) == PHOTON || std::abs(pMC->GetParticleId()) == E_MINUS);
+    }
+
+    // Now assuming that the MC particle information is not rolled up
+    if (std::abs(pMC->GetParticleId()) != PHOTON && std::abs(pMC->GetParticleId()) != E_MINUS)
+    {
+        return false;
+    }
+    const MCParticle *const pParentMC{*(pMC->GetParentList().begin())};
+    if (std::abs(pMC->GetParticleId()) != PHOTON && std::abs(pParentMC->GetParticleId()) != E_MINUS)
+    {
+        return false;
+    }
+    return true;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+bool CheatedTwoDClusteringAlgorithm::ProbablyDeltaRay(const MCParticle *const pMC, const MCParticle *&pParentMC) const
+{
+    if (std::abs(pMC->GetParticleId()) != E_MINUS)
+    {
+        return false;
+    }
+    pParentMC = *(pMC->GetParentList().begin());
+    if (!pParentMC->IsRootParticle() && std::abs(pParentMC->GetParticleId()) != PHOTON && std::abs(pParentMC->GetParticleId()) != E_MINUS)
+    {
+        return true;
+    }
+    return false;
+}
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+const MCParticle* CheatedTwoDClusteringAlgorithm::FindLeadingShowerMC(const MCParticle *const pMC) const
+{
+    const MCParticle *pCurrentMC{pMC};
+    const MCParticle *pLeadingMC{nullptr};
+    while (!pCurrentMC->IsRootParticle())
+    {
+        const MCParticle *const pParentMC{*(pCurrentMC->GetParentList().begin())};
+
+        if (std::abs(pParentMC->GetParticleId()) == PHOTON || std::abs(pParentMC->GetParticleId()) == E_MINUS)
+        {
+            pCurrentMC = pParentMC;
+            continue;
+        }
+
+        pLeadingMC = pCurrentMC;
+        break;
+    }
+    return pLeadingMC;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
 StatusCode CheatedTwoDClusteringAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
 {
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "ClusterListName", m_clusterListName))
@@ -136,9 +246,23 @@ StatusCode CheatedTwoDClusteringAlgorithm::ReadSettings(const TiXmlHandle xmlHan
         XmlHelper::ReadValue(xmlHandle, "ShowerParticlesOnly", m_showerParticlesOnly))
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "TrackParticlesOnly", m_trackParticlesOnly))
-    if (m_showerParticlesOnly && m_trackParticlesOnly) { return STATUS_CODE_INVALID_PARAMETER; }
+    if (m_showerParticlesOnly && m_trackParticlesOnly)
+    {
+        return STATUS_CODE_INVALID_PARAMETER;
+    }
+
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
-        XmlHelper::ReadValue(xmlHandle, "FoldShowers", m_foldShowers))
+        XmlHelper::ReadValue(xmlHandle, "LeadingShowerMCIsTrack", m_leadingShowerMCIsTrack))
+    if (!m_showerParticlesOnly && !m_trackParticlesOnly && m_leadingShowerMCIsTrack)
+    {
+        return STATUS_CODE_INVALID_PARAMETER;
+    }
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "IgnoreOverlappingDeltaRays", m_ignoreOverlappingDeltaRays))
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "FoldToLeadingShower", m_foldToLeadingShower))
 
     return STATUS_CODE_SUCCESS;
 }
