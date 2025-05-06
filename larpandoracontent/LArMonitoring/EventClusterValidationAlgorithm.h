@@ -89,6 +89,11 @@ private:
     void GetHitParents(const pandora::CaloHitList &caloHits, const pandora::ClusterList &clusters,
         std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
 
+    const pandora::MCParticle* FoldPotentialDeltaRayTo(const pandora::CaloHit *const pCaloHit, const pandora::MCParticle *const pMC) const;
+
+    const pandora::MCParticle* FoldMCTo(const pandora::MCParticle *const pMC) const;
+
+    void VisualizeTargetClusters(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
     /**
      *  @brief Erase hits associated to an MCParticle that does meet a minimum number of hits in the view
      *
@@ -115,13 +120,19 @@ private:
     void SetBranches(ClusterMetrics &metrics, float randIdx, std::string branchPrefix) const;
 
     int m_eventNumber;                           ///< To track the current event number
+    float m_deltaRayLengthThresholdSquared;      ///< Threshold for defining small delta rays that will be folded to the parent particle
+    float m_deltaRayParentWeightThreshold;       ///< Threshold for weight contribution of parent particle for it take the delta ray's hit
     std::string m_fileName;                      ///< The filename of the ROOT output file
     std::string m_treeName;                      ///< The name of the ROOT tree
     std::vector<std::string> m_caloHitListNames; ///< The names of the hit lists containing all 2D hits
     std::vector<std::string> m_clusterListNames; ///< The names of the lists of 2D clusters to process
-    int m_minMCHitsPerView; ///< Threshold on total main MCParticle hits in each view for consideration in metric calculations
+    int m_minMCHitsPerView;                      ///< Threshold on total main MCParticle hits in each view for consideration in metric calculations
     bool m_onlyRandIndices;                      ///< Flag to only calculate the ajusted rand index for track/shower/all particles
     bool m_onlyRandIndex;                        ///< Flag to only calculate the ajusted rand index over all particles
+    bool m_foldShowers;                          ///< Flag to fold shower MC particles to their leading shower MC partilce
+    bool m_handleDeltaRays;                      ///< Flag to fold short delta rays + ignore contributions from daughter electrons that overlap with their parent
+    bool m_ignorePureShowers;                    ///< Flag to ignore pure shower reco clusters in the rand index calculation, meaning only shower impurity is penalised
+    bool m_visualize;                            ///< Flag display the target clustering derived from MC particles
 };
 
 } // namespace lar_content
