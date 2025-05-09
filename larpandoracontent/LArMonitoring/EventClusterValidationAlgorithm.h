@@ -1,9 +1,9 @@
 /**
  *  @file   larpandoracontent/LArMonitoring/EventClusterValidationAlgorithm.h
  *
- *  @brief  Header file of the event-level cluster validation.
- *
- *  $Log: $
+ *  @brief  Header file of the event-level cluster validation. Calculate metrics that aim to quantify the quality of 2D clusters at
+ *          the level of a single view. There are some extra considerations implemented to not penalise clusters that are unobtainable
+ *          from 2D clustering algorithms alons (delta rays that overlap with the parent particle in a view and merged showers)
  */
 #ifndef LAR_EVENT_CLUSTER_VALIDATION_ALGORITHM_H
 #define LAR_EVENT_CLUSTER_VALIDATION_ALGORITHM_H 1
@@ -45,6 +45,7 @@ public:
 
         const pandora::MCParticle *m_pMainMC;
         const pandora::Cluster *m_pCluster;
+        const pandora::MCParticle *m_pClusterMainMC;
     };
 
     /**
@@ -58,7 +59,9 @@ public:
     ~EventClusterValidationAlgorithm();
 
 private:
-    typedef std::map<const pandora::Cluster *const, std::map<const pandora::MCParticle *const, int>> ContingencyTable;
+    template<typename Ti, typename Tj>
+    using ContingencyTable = std::map<Ti, std::map<Tj, int>>;
+    // typedef std::map<const pandora::Cluster *const, std::map<const pandora::MCParticle *const, int>> ContingencyTable;
 
     pandora::StatusCode Run();
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
@@ -76,6 +79,8 @@ private:
      *          (Ref. for Adjusted Rand Index: https://link.springer.com/article/10.1007/BF01908075)
      *
      *  @param[in] hitParents Map of hits being considered to the Cluster/MCParticle they belong to
+     *
+     *  @return The value of the rand index
      */
     float CalcRandIndex(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
 
@@ -89,11 +94,44 @@ private:
     void GetHitParents(const pandora::CaloHitList &caloHits, const pandora::ClusterList &clusters,
         std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
 
+    /**
+     *  @brief Tries to identify and deal with impossible-to-cluster-correctly delta ray hits by assigning the hit to the
+     *         parent particle's cluster if some conditions are met.
+     *
+     *  @param[in] pCaloHit The hit
+     *  @param[in] pMC      The main MC particle of the hit
+     *
+     *  @return The MC particle the hit should be assigned to, this will either be the inputted MC particle or the parent MC particle
+     */
     const pandora::MCParticle* FoldPotentialDeltaRayTo(const pandora::CaloHit *const pCaloHit, const pandora::MCParticle *const pMC) const;
 
+    /**
+     *  @brief Finds the ancestor that a child MC particle should be associated with to roll-up an EM shower
+     *
+     *  @param[in] pMC The MC particle
+     *
+     *  @return The ancestor MC particle, this will be the inputted MC particle for an MC particle that should not be rolled-up
+     */
     const pandora::MCParticle* FoldMCTo(const pandora::MCParticle *const pMC) const;
 
+    /**
+     *  @brief Draw the true clusters being compared to
+     *
+     *  @param[in] hitParents Map of hits to the Cluster/MCParticle they belong to
+     */
     void VisualizeTargetClusters(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
+
+    /**
+     *  @brief Draw the reco clusters used in the Rand Index calculation. These will be different from the clusters inputted to the
+     *         the algorithm if MergeShowerClustersForRandIndex is true.
+     *
+     *  @param[in] hitParents Map of hits to the Cluster/MCParticle they belong to
+     *  @param[in] hitParents Map of hits to the cluster they merge with for the Rand Index Calculation.
+     */
+    void VisualizeRandIndexRecoClusters(
+        std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents,
+        std::map<const pandora::CaloHit *const, const pandora::Cluster *const> &hitMergeTargets) const;
+
     /**
      *  @brief Erase hits associated to an MCParticle that does meet a minimum number of hits in the view
      *
@@ -114,7 +152,7 @@ private:
      *  @brief Update the branches of the TTree for this entry
      *
      *  @param[in] metrics      Metrics for clusters in a view
-     *  @param[in] randIfx      Adjusted Rand index
+     *  @param[in] randIdx      Adjusted Rand Index
      *  @param[in] branchPrefix Prefix for the branch name
      */
     void SetBranches(ClusterMetrics &metrics, float randIdx, std::string branchPrefix) const;
@@ -131,7 +169,7 @@ private:
     bool m_onlyRandIndex;                        ///< Flag to only calculate the ajusted rand index over all particles
     bool m_foldShowers;                          ///< Flag to fold shower MC particles to their leading shower MC partilce
     bool m_handleDeltaRays;                      ///< Flag to fold short delta rays + ignore contributions from daughter electrons that overlap with their parent
-    bool m_ignorePureShowers;                    ///< Flag to ignore pure shower reco clusters in the rand index calculation, meaning only shower impurity is penalised
+    bool m_mergeShowerClustersForRandIndex;      ///< Flag to merge shower-matched clusters into leading shower MC particle for rand index calculation, note this is only makes any sense for showers folded in the simulation or with m_foldShowers
     bool m_visualize;                            ///< Flag display the target clustering derived from MC particles
 };
 

@@ -23,7 +23,8 @@ namespace lar_content
 
 EventClusterValidationAlgorithm::CaloHitParents::CaloHitParents() :
     m_pMainMC{nullptr},
-    m_pCluster{nullptr}
+    m_pCluster{nullptr},
+    m_pClusterMainMC{nullptr}
 {
 }
 
@@ -44,14 +45,14 @@ EventClusterValidationAlgorithm::ClusterMetrics::ClusterMetrics() :
 EventClusterValidationAlgorithm::EventClusterValidationAlgorithm() :
     m_eventNumber{0},
     m_deltaRayLengthThresholdSquared{pow(4.67f / 2.f, 2.f)}, // ~half a wire pitch
-    m_deltaRayParentWeightThreshold{0.05f},
+    m_deltaRayParentWeightThreshold{0.01f}, // 0.05f
     m_caloHitListNames{ { "CaloHitList2D" } },
     m_minMCHitsPerView{0},
     m_onlyRandIndices{false},
     m_onlyRandIndex{false},
     m_foldShowers{false},
     m_handleDeltaRays{false},
-    m_ignorePureShowers{false},
+    m_mergeShowerClustersForRandIndex{false},
     m_visualize{false}
 {
 }
@@ -63,6 +64,11 @@ EventClusterValidationAlgorithm::~EventClusterValidationAlgorithm()
     PANDORA_MONITORING_API(SaveTree(this->GetPandora(), m_treeName, m_fileName, "UPDATE"));
 
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName + "_meta", "min_mc_hits_per_view", m_minMCHitsPerView));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName + "_meta", "fold_showers", m_foldShowers));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName + "_meta", "handle_delta_rays", m_handleDeltaRays));
+    PANDORA_MONITORING_API(
+        SetTreeVariable(
+            this->GetPandora(), m_treeName + "_meta", "merge_shower_clusters_for_rand_index", m_mergeShowerClustersForRandIndex));
     PANDORA_MONITORING_API(FillTree(this->GetPandora(), m_treeName + "_meta"));
     PANDORA_MONITORING_API(SaveTree(this->GetPandora(), m_treeName + "_meta", m_fileName, "UPDATE"));
 }
@@ -128,6 +134,7 @@ StatusCode EventClusterValidationAlgorithm::Run()
             GetMetrics(hitParentsValid, metrics);
 
             float adjustedRandI{CalcRandIndex(hitParentsValid)};
+            std::cout << view << ": " << adjustedRandI << "\n";
 
             std::string branchPrefix;
             if (valType == ValidationType::ALL)
@@ -194,12 +201,38 @@ void EventClusterValidationAlgorithm::GetHitParents(
         CaloHitList clusterCaloHits;
         pCluster->GetOrderedCaloHitList().FillCaloHitList(clusterCaloHits);
         clusterCaloHits.insert(clusterCaloHits.end(), isolatedHits.begin(), isolatedHits.end());
+
+        std::map<const MCParticle *const, int> mainMCParticleNHits;
         for (const CaloHit *const pCaloHit : clusterCaloHits)
         {
             // Ignoring the calo hit if truth matching is missing
             if (hitParents.find(pCaloHit) == hitParents.end())
                 continue;
+
+            const MCParticle *const pMC = hitParents.at(pCaloHit).m_pMainMC;
+            if (mainMCParticleNHits.find(pMC) == mainMCParticleNHits.end())
+                mainMCParticleNHits[pMC] = 0;
+            mainMCParticleNHits.at(pMC)++;
+
             hitParents[pCaloHit].m_pCluster = pCluster;
+        }
+
+        // Store the MC particle that contributes the most hits to the cluster of a hit
+        const MCParticle *pClusterMainMC{nullptr};
+        int maxHits{0};
+        for (const auto &[pMC, nHits] : mainMCParticleNHits)
+        {
+            if (nHits > maxHits)
+            {
+                pClusterMainMC = pMC;
+                maxHits = nHits;
+            }
+        }
+        for (const CaloHit *const pCaloHit : clusterCaloHits)
+        {
+            if (hitParents.find(pCaloHit) == hitParents.end())
+                continue;
+            hitParents[pCaloHit].m_pClusterMainMC = pClusterMainMC;
         }
     }
 }
@@ -233,10 +266,6 @@ const MCParticle* EventClusterValidationAlgorithm::FoldMCTo(const MCParticle *co
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-// If MC particle that may be delta ray (electron with charged track parent):
-//   if short and has no descendents: fold the hit into the parent particle
-//   else: fold the hit into the parent track if delta rays does not contribute significatnly more (~90% of total) than the parent particle
-// else: leave the hit as it
 const MCParticle* EventClusterValidationAlgorithm::FoldPotentialDeltaRayTo(const CaloHit *const pCaloHit, const MCParticle *const pMC) const
 {
     // Not an electron -> not a delta ray -> do nothing
@@ -336,7 +365,8 @@ std::map<const CaloHit *const, EventClusterValidationAlgorithm::CaloHitParents> 
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-void EventClusterValidationAlgorithm::GetMetrics(const std::map<const CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const
+void EventClusterValidationAlgorithm::GetMetrics(
+    const std::map<const CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const
 {
     if (m_onlyRandIndex || m_onlyRandIndices)
     {
@@ -420,15 +450,47 @@ void EventClusterValidationAlgorithm::GetMetrics(const std::map<const CaloHit *c
 float EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *const, CaloHitParents> &hitParents) const
 {
     // Fill contingency table
-    ContingencyTable cTable;
+    ContingencyTable<const Cluster *const, const MCParticle *const> cTable;
+
+    // Do a perfect shower growing of the reco clusters
+    std::map<const CaloHit *const, const Cluster *const> hitMergeTarget;
+    if (m_mergeShowerClustersForRandIndex)
+    {
+        std::map<const MCParticle *const, const Cluster *const> mcMergeTarget;
+        for (const auto &[pCaloHit, parents] : hitParents)
+        {
+            const int pdg{std::abs(parents.m_pClusterMainMC->GetParticleId())};
+            if (pdg != PHOTON && pdg != E_MINUS)
+            {
+                continue;
+            }
+            // The first cluster we come across will used as the target for the merging within the shower
+            if (mcMergeTarget.find(parents.m_pClusterMainMC) == mcMergeTarget.end())
+            {
+                mcMergeTarget.insert({parents.m_pClusterMainMC, parents.m_pCluster});
+            }
+            hitMergeTarget.insert({pCaloHit, mcMergeTarget.at(parents.m_pClusterMainMC)});
+        }
+    }
+
     for (const auto &[pCaloHit, parents] : hitParents)
     {
         const MCParticle *const pMC = parents.m_pMainMC;
-        const Cluster *const pCluster = parents.m_pCluster;
+        const Cluster *pCluster = parents.m_pCluster;
+
+        if (hitMergeTarget.find(pCaloHit) != hitMergeTarget.end())
+        {
+            pCluster = hitMergeTarget.at(pCaloHit);
+        }
 
         if (cTable.find(pCluster) == cTable.end() || cTable.at(pCluster).find(pMC) == cTable.at(pCluster).end())
             cTable[pCluster][pMC] = 0;
         cTable.at(pCluster).at(pMC)++;
+    }
+
+    if (m_visualize && m_mergeShowerClustersForRandIndex) // This is only worth seeing if the cheated merging has occured
+    {
+        this->VisualizeRandIndexRecoClusters(hitParents, hitMergeTarget);
     }
 
     return LArMonitoringHelper::CalcRandIndex(cTable);
@@ -471,7 +533,54 @@ void EventClusterValidationAlgorithm::VisualizeTargetClusters(std::map<const Cal
     int color {1}; // 0 is white
     for (const auto &[pMC, caloHits] : mcToCaloHits)
     {
-        PANDORA_MONITORING_API(VisualizeCaloHits(this->GetPandora(), &caloHits, std::to_string(pMC->GetParticleId()) + " - " + std::to_string(pMC->GetEnergy()), static_cast<Color>(color++)));
+        PANDORA_MONITORING_API(
+            VisualizeCaloHits(this->GetPandora(),
+                &caloHits,
+                "From MC: " + std::to_string(pMC->GetParticleId()) + " - " + std::to_string(pMC->GetEnergy()),
+                static_cast<Color>(color++)));
+        if (color > 30) // start getting into the AUTO colors territory
+        {
+            color = 1;
+        }
+    }
+    PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+void EventClusterValidationAlgorithm::VisualizeRandIndexRecoClusters(
+    std::map<const CaloHit *const, CaloHitParents> &hitParents,
+    std::map<const CaloHit *const, const Cluster *const> &hitMergeTargets) const
+{
+    std::map<const Cluster *const, CaloHitList> clusterToCaloHits;
+    std::map<const Cluster *const, const MCParticle *const> clusterToMainMC;
+    for (const auto &[pCaloHit, parents] : hitParents)
+    {
+        if (clusterToMainMC.find(parents.m_pCluster) == clusterToMainMC.end())
+        {
+            clusterToMainMC.insert({parents.m_pCluster, parents.m_pClusterMainMC});
+        }
+
+        if (hitMergeTargets.find(pCaloHit) == hitMergeTargets.end())
+        {
+            clusterToCaloHits[parents.m_pCluster].push_back(pCaloHit);
+        }
+        else
+        {
+            clusterToCaloHits[hitMergeTargets.at(pCaloHit)].push_back(pCaloHit);
+        }
+    }
+
+    int color {1}; // 0 is white
+    for (const auto &[pCluster, caloHits] : clusterToCaloHits)
+    {
+        const MCParticle *const pMC{clusterToMainMC.at(pCluster)};
+        PANDORA_MONITORING_API(
+            VisualizeCaloHits(
+                this->GetPandora(),
+                &caloHits,
+                "From Reco: " + std::to_string(pMC->GetParticleId()) + " - " + std::to_string(pMC->GetEnergy()),
+                static_cast<Color>(color++)));
         if (color > 30) // start getting into the AUTO colors territory
         {
             color = 1;
@@ -488,7 +597,8 @@ StatusCode EventClusterValidationAlgorithm::ReadSettings(const TiXmlHandle xmlHa
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "TreeName", m_treeName));
 
     std::vector<std::string> caloHitListNames;
-    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "CaloHitListNames", caloHitListNames));
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "CaloHitListNames", caloHitListNames));
     if (!caloHitListNames.empty()) { m_caloHitListNames = caloHitListNames; }
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "ClusterListNames", m_clusterListNames));
 
@@ -503,7 +613,9 @@ StatusCode EventClusterValidationAlgorithm::ReadSettings(const TiXmlHandle xmlHa
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "HandleDeltaRays", m_handleDeltaRays));
     PANDORA_RETURN_RESULT_IF_AND_IF(
-        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "IgnorePureShowers", m_ignorePureShowers));
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "MergeShowerClustersForRandIndex", m_mergeShowerClustersForRandIndex));
+
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "Visualize", m_visualize));
 
