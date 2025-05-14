@@ -13,6 +13,7 @@
 #include "larpandoracontent/LArHelpers/LArClusterHelper.h"
 #include "larpandoracontent/LArHelpers/LArMonitoringHelper.h"
 #include "larpandoracontent/LArHelpers/LArMCParticleHelper.h"
+#include "Helpers/MCParticleHelper.h"
 
 #include <numeric>
 
@@ -64,11 +65,11 @@ EventClusterValidationAlgorithm::~EventClusterValidationAlgorithm()
     PANDORA_MONITORING_API(SaveTree(this->GetPandora(), m_treeName, m_fileName, "UPDATE"));
 
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName + "_meta", "min_mc_hits_per_view", m_minMCHitsPerView));
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName + "_meta", "fold_showers", m_foldShowers));
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName + "_meta", "handle_delta_rays", m_handleDeltaRays));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName + "_meta", "fold_showers", m_foldShowers ? 1 : 0));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName + "_meta", "handle_delta_rays", m_handleDeltaRays ? 1 : 0));
     PANDORA_MONITORING_API(
         SetTreeVariable(
-            this->GetPandora(), m_treeName + "_meta", "merge_shower_clusters_for_rand_index", m_mergeShowerClustersForRandIndex));
+            this->GetPandora(), m_treeName + "_meta", "merge_shower_clusters_for_rand_index", m_mergeShowerClustersForRandIndex ? 1 : 0));
     PANDORA_MONITORING_API(FillTree(this->GetPandora(), m_treeName + "_meta"));
     PANDORA_MONITORING_API(SaveTree(this->GetPandora(), m_treeName + "_meta", m_fileName, "UPDATE"));
 }
@@ -133,8 +134,7 @@ StatusCode EventClusterValidationAlgorithm::Run()
             ClusterMetrics metrics;
             GetMetrics(hitParentsValid, metrics);
 
-            float adjustedRandI{CalcRandIndex(hitParentsValid)};
-            std::cout << view << ": " << adjustedRandI << "\n";
+            double adjustedRandI{CalcRandIndex(hitParentsValid)};
 
             std::string branchPrefix;
             if (valType == ValidationType::ALL)
@@ -163,13 +163,20 @@ void EventClusterValidationAlgorithm::GetHitParents(
     {
         const MCParticle *pMainMC{nullptr};
         const MCParticleWeightMap &weightMap{pCaloHit->GetMCParticleWeightMap()};
-        float maxWeight{std::numeric_limits<float>::lowest()};
+        float maxWeight{0.f};
         for (const auto &[pMC, weight] : weightMap)
         {
             if (weight > maxWeight)
             {
                 pMainMC = pMC;
                 maxWeight = weight;
+            }
+            if (weight == maxWeight) // tie-breaker (very unlikely)
+            {
+                if (LArMCParticleHelper::SortByMomentum(pMC, pMainMC))
+                {
+                    pMainMC = pMC;
+                }
             }
         }
         if (pMainMC)
@@ -205,19 +212,22 @@ void EventClusterValidationAlgorithm::GetHitParents(
         std::map<const MCParticle *const, int> mainMCParticleNHits;
         for (const CaloHit *const pCaloHit : clusterCaloHits)
         {
-            // Ignoring the calo hit if truth matching is missing
             if (hitParents.find(pCaloHit) == hitParents.end())
+            {
                 continue;
+            }
 
             const MCParticle *const pMC = hitParents.at(pCaloHit).m_pMainMC;
             if (mainMCParticleNHits.find(pMC) == mainMCParticleNHits.end())
+            {
                 mainMCParticleNHits[pMC] = 0;
+            }
             mainMCParticleNHits.at(pMC)++;
 
             hitParents[pCaloHit].m_pCluster = pCluster;
         }
 
-        // Store the MC particle that contributes the most hits to the cluster of a hit
+        // Store the MC particle that contributes the most hits to the cluster of the hit of interest
         const MCParticle *pClusterMainMC{nullptr};
         int maxHits{0};
         for (const auto &[pMC, nHits] : mainMCParticleNHits)
@@ -226,6 +236,13 @@ void EventClusterValidationAlgorithm::GetHitParents(
             {
                 pClusterMainMC = pMC;
                 maxHits = nHits;
+            }
+            else if (nHits == maxHits) // tie-breaker
+            {
+                if (LArMCParticleHelper::SortByMomentum(pMC, pClusterMainMC))
+                {
+                    pClusterMainMC = pMC;
+                }
             }
         }
         for (const CaloHit *const pCaloHit : clusterCaloHits)
@@ -246,6 +263,7 @@ const MCParticle* EventClusterValidationAlgorithm::FoldMCTo(const MCParticle *co
     {
         return pMC;
     }
+    bool hasAncestorElectron{false};
 
     const MCParticle *pCurrentMC{pMC};
     const MCParticle *pLeadingMC{pMC};
@@ -255,16 +273,58 @@ const MCParticle* EventClusterValidationAlgorithm::FoldMCTo(const MCParticle *co
         const int parentPdg{std::abs(pParentMC->GetParticleId())};
         if (parentPdg == PHOTON || parentPdg == E_MINUS)
         {
+            if (parentPdg == E_MINUS)
+            {
+                hasAncestorElectron = true;
+            }
             pCurrentMC = pParentMC;
             continue;
         }
         pLeadingMC = pCurrentMC;
         break;
     }
-    return pLeadingMC;
+
+    // Don't fold "showers" that consist of only compton scatters
+    // Trying to prevents distant diffuse hits disconnected from a "real" bremm + pair production shower being clustered together
+    if (hasAncestorElectron || std::abs(pLeadingMC->GetParticleId()) == E_MINUS)
+    {
+        return pLeadingMC;
+    }
+    else if (this->CausesShower(pLeadingMC, 0))
+    {
+        return pLeadingMC;
+    }
+    else
+    {
+        return pMC;
+    }
 }
 
-//------------------------------------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+bool EventClusterValidationAlgorithm::CausesShower(const MCParticle *const pMC, int nDescendentElectrons) const
+{
+    if (nDescendentElectrons > 1)
+    {
+        return true;
+    }
+
+    if (std::abs(pMC->GetParticleId()) == E_MINUS)
+    {
+        nDescendentElectrons++; // Including the parent particle, ie. the first in the recursion, as a descendent
+    }
+    for (const MCParticle *pChildMC : pMC->GetDaughterList())
+    {
+        if(this->CausesShower(pChildMC, nDescendentElectrons))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+//-------------------------------------------------------------------------------------------------------------------------------------------
 
 const MCParticle* EventClusterValidationAlgorithm::FoldPotentialDeltaRayTo(const CaloHit *const pCaloHit, const MCParticle *const pMC) const
 {
@@ -282,26 +342,13 @@ const MCParticle* EventClusterValidationAlgorithm::FoldPotentialDeltaRayTo(const
         return pMC;
     }
 
-    bool causesShower{false};
-    MCParticleList childMCs;
-    LArMCParticleHelper::GetAllDescendentMCParticles(pMC, childMCs);
-    for (const MCParticle *const childMC : childMCs)
-    {
-        const int pdg{std::abs(childMC->GetParticleId())};
-        if (pdg == E_MINUS)
-        { 
-            causesShower = true;
-            break;
-        }
-    }
-
     // Delta ray that does not start a shower and is short -> fold into parent particle
-    if (!causesShower && (pMC->GetVertex() - pMC->GetEndpoint()).GetMagnitudeSquared() < m_deltaRayLengthThresholdSquared)
+    if (!this->CausesShower(pMC, 0) && (pMC->GetVertex() - pMC->GetEndpoint()).GetMagnitudeSquared() < m_deltaRayLengthThresholdSquared)
     {
         return pParentMC;
     }
 
-    // Now have a delta ray that we would like to cluster but only the hits that not overalapping with the parent particle
+    // Now have a delta ray that we would like to cluster but only the hits that not overlapping with the parent particle
     float parentWeight{std::numeric_limits<float>::lowest()};
     const MCParticleWeightMap &weightMap{pCaloHit->GetMCParticleWeightMap()};
     for (const auto &[pContributingMC, weight] : weightMap)
@@ -423,7 +470,7 @@ void EventClusterValidationAlgorithm::GetMetrics(
         // Determine which MC particle contributes the most weight across the cluster
         const MCParticle *pMainMC{nullptr};
         int maxHits{0};
-        for (const auto &[pMC, nHits] : mainMCParticleHits)
+        for (const auto &[pMC, nHits] : mainMCParticleHits)  // XXX not accounting for ties
         {
             if (nHits > maxHits)
             {
@@ -447,13 +494,14 @@ void EventClusterValidationAlgorithm::GetMetrics(
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-float EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *const, CaloHitParents> &hitParents) const
+double EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *const, CaloHitParents> &hitParents) const
 {
     // Fill contingency table
     ContingencyTable<const Cluster *const, const MCParticle *const> cTable;
 
     // Do a perfect shower growing of the reco clusters
     std::map<const CaloHit *const, const Cluster *const> hitMergeTarget;
+    int nShowerClusterMainMCs{0};
     if (m_mergeShowerClustersForRandIndex)
     {
         std::map<const MCParticle *const, const Cluster *const> mcMergeTarget;
@@ -464,12 +512,22 @@ float EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *con
             {
                 continue;
             }
+            nShowerClusterMainMCs++;
             // The first cluster we come across will used as the target for the merging within the shower
             if (mcMergeTarget.find(parents.m_pClusterMainMC) == mcMergeTarget.end())
             {
                 mcMergeTarget.insert({parents.m_pClusterMainMC, parents.m_pCluster});
             }
             hitMergeTarget.insert({pCaloHit, mcMergeTarget.at(parents.m_pClusterMainMC)});
+        }
+    }
+    int nShowerMainMCs{0};
+    for (const auto &[pCaloHit, parents] : hitParents)
+    {
+        const int pdg{std::abs(parents.m_pMainMC->GetParticleId())};
+        if (pdg == PHOTON || pdg == E_MINUS)
+        {
+            nShowerMainMCs++;
         }
     }
 
@@ -488,7 +546,7 @@ float EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *con
         cTable.at(pCluster).at(pMC)++;
     }
 
-    if (m_visualize && m_mergeShowerClustersForRandIndex) // This is only worth seeing if the cheated merging has occured
+    if (m_visualize && m_mergeShowerClustersForRandIndex) // This is only worth seeing if the cheated merging has occurred
     {
         this->VisualizeRandIndexRecoClusters(hitParents, hitMergeTarget);
     }
@@ -499,7 +557,7 @@ float EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *con
 //------------------------------------------------------------------------------------------------------------------------------------------
 
 void EventClusterValidationAlgorithm::SetBranches(
-    [[maybe_unused]] ClusterMetrics &metrics, [[maybe_unused]] float randIndex, [[maybe_unused]] std::string branchPrefix) const
+    [[maybe_unused]] ClusterMetrics &metrics, [[maybe_unused]] double randIndex, [[maybe_unused]] std::string branchPrefix) const
 {
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "adjusted_rand_idx", randIndex));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "n_hits", metrics.m_nHits));

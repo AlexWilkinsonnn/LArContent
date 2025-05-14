@@ -316,7 +316,7 @@ void LArMonitoringHelper::PrintMatchingTable(const PfoVector &orderedPfoVector, 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
 template <typename Ti, typename Tj>
-float LArMonitoringHelper::CalcRandIndex(const std::map<const Ti, std::map<const Tj, int>> &cTable)
+double LArMonitoringHelper::CalcRandIndex(const std::map<const Ti, std::map<const Tj, int>> &cTable)
 {
     double aTerm{0.}; // Term made from summing over columns
     int n{0};         // Total entries in table
@@ -373,7 +373,7 @@ float LArMonitoringHelper::CalcRandIndex(const std::map<const Ti, std::map<const
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-float LArMonitoringHelper::CalcRandIndex(const CaloHitList &caloHits, const ClusterList &clusters)
+double LArMonitoringHelper::CalcRandIndex(const CaloHitList &caloHits, const ClusterList &clusters)
 {
     std::map<const Cluster *const, std::map<const MCParticle *const, int>> cTable;
     FillContingencyTable(caloHits, clusters, cTable);
@@ -443,6 +443,6 @@ void LArMonitoringHelper::FillContingencyTable(
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-template float LArMonitoringHelper::CalcRandIndex(const std::map<const Cluster *const, std::map<const MCParticle *const, int>> &cTable);
+template double LArMonitoringHelper::CalcRandIndex(const std::map<const Cluster *const, std::map<const MCParticle *const, int>> &cTable);
 
 } // namespace lar_content

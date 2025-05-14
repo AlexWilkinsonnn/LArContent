@@ -82,7 +82,7 @@ private:
      *
      *  @return The value of the rand index
      */
-    float CalcRandIndex(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
+    double CalcRandIndex(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
 
     /**
      *  @brief Find the cluster and MCParticle each hit belongs to
@@ -113,6 +113,17 @@ private:
      *  @return The ancestor MC particle, this will be the inputted MC particle for an MC particle that should not be rolled-up
      */
     const pandora::MCParticle* FoldMCTo(const pandora::MCParticle *const pMC) const;
+
+    /**
+     *  @brief Recursive function to check descendent particles for signature of a shower (e -> gamma -> e).
+     *         Used to identify delta-rays that shower and photons that only undergo compton scatters leaving diffuse hits.
+     *
+     *  @param[in] pMC                  The MC particle to check descendents of
+     *  @param[in] nDescendentElectrons The number of electrons seen while descending from the original photon MC particle
+     *
+     *  @return Flag to indicate if more than 1 electron was seen while descending any of the descendent particle association paths
+     */
+    bool CausesShower(const pandora::MCParticle *const pMC, int nDescendentElectrons) const;
 
     /**
      *  @brief Draw the true clusters being compared to
@@ -155,7 +166,7 @@ private:
      *  @param[in] randIdx      Adjusted Rand Index
      *  @param[in] branchPrefix Prefix for the branch name
      */
-    void SetBranches(ClusterMetrics &metrics, float randIdx, std::string branchPrefix) const;
+    void SetBranches(ClusterMetrics &metrics, double randIdx, std::string branchPrefix) const;
 
     int m_eventNumber;                           ///< To track the current event number
     float m_deltaRayLengthThresholdSquared;      ///< Threshold for defining small delta rays that will be folded to the parent particle

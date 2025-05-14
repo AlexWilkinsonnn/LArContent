@@ -90,7 +90,7 @@ public:
      *                    to the value of the table at this entry (which is the intersection of the two clusters)
      */
     template <typename Ti, typename Tj>
-    static float CalcRandIndex(const std::map<const Ti, std::map<const Tj, int>> &cTable);
+    static double CalcRandIndex(const std::map<const Ti, std::map<const Tj, int>> &cTable);
 
     /**
      *  @brief  Calculate the adjusted Rand Index for the clustering defined by MCPartices and by CaloHits.
@@ -102,7 +102,7 @@ public:
      *  @param[in] caloHits List of hits
      *  @param[in] clusters List of clusters
      */
-    static float CalcRandIndex(const pandora::CaloHitList &caloHits, const pandora::ClusterList &clusters);
+    static double CalcRandIndex(const pandora::CaloHitList &caloHits, const pandora::ClusterList &clusters);
 
     /**
      *  @brief  Fill the contingency table for a set of CaloHits partitioned by Cluster and parent MCParticle.
