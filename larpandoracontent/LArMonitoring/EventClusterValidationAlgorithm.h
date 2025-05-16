@@ -3,7 +3,7 @@
  *
  *  @brief  Header file of the event-level cluster validation. Calculate metrics that aim to quantify the quality of 2D clusters at
  *          the level of a single view. There are some extra considerations implemented to not penalise clusters that are unobtainable
- *          from 2D clustering algorithms alons (delta rays that overlap with the parent particle in a view and merged showers)
+ *          from 2D clustering algorithms alone (delta rays that overlap with the parent particle in a view and merged showers)
  */
 #ifndef LAR_EVENT_CLUSTER_VALIDATION_ALGORITHM_H
 #define LAR_EVENT_CLUSTER_VALIDATION_ALGORITHM_H 1
@@ -29,6 +29,19 @@ private:
         int m_nHits;
         int m_nClusters;
         int m_nMainMCs;
+    };
+
+    struct MatchedParticleMetrics
+    {
+        MatchedParticleMetrics();
+
+        std::vector<int> m_pdg;
+        std::vector<int> m_causesShower;
+        std::vector<int> m_isPrimary;
+        std::vector<float> m_trueEnergy;
+        std::vector<int> m_nTrueHits;
+        std::vector<int> m_nMatchedCorrectHits;
+        std::vector<int> m_nMatchedTotalHits;
     };
 
     enum ValidationType
@@ -61,7 +74,6 @@ public:
 private:
     template<typename Ti, typename Tj>
     using ContingencyTable = std::map<Ti, std::map<Tj, int>>;
-    // typedef std::map<const pandora::Cluster *const, std::map<const pandora::MCParticle *const, int>> ContingencyTable;
 
     pandora::StatusCode Run();
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
@@ -72,7 +84,16 @@ private:
      *  @param[in]  hitParents Map of hits being considered to the Cluster/MCParticle they belong to
      *  @param[out] metrics    Metrics for the clusters in this view
      */
-    void GetMetrics(const std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const;
+    void GetClusterMetrics(const std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const;
+
+    /**
+     *  @brief Retrieve the metrics for every MCParticle in a view by matching clusters to a true MCParticle
+     *
+     *  @param[in]  hitParents Map of hits being considered to the Cluster/MCParticle they belong to
+     *  @param[out] metrics    Metrics for the matched MCParticles in this view
+     */
+    void GetMatchedParticleMetrics(
+        const std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, MatchedParticleMetrics &metrics) const;
 
     /**
      *  @brief Calculate Rand Index for the clusters with the clusters of true MCParticles.
@@ -162,26 +183,37 @@ private:
     /**
      *  @brief Update the branches of the TTree for this entry
      *
-     *  @param[in] metrics      Metrics for clusters in a view
-     *  @param[in] randIdx      Adjusted Rand Index
-     *  @param[in] branchPrefix Prefix for the branch name
+     *  @param[in] clusterMetrics         Metrics for clusters in the view
+     *  @param[in] matchedParticleMetrics Metrics each particle matched to a cluster in the view
+     *  @param[in] randIdx                Adjusted Rand Index
+     *  @param[in] view                   The view
+     *  @param[in] branchPrefix           Prefix for the branch name
      */
-    void SetBranches(ClusterMetrics &metrics, double randIdx, std::string branchPrefix) const;
+    void SetBranches(
+        const ClusterMetrics &metrics,
+        const MatchedParticleMetrics &matchedParticleMetrics,
+        const double randIdx,
+        const int view,
+        const ValidationType valType) const;
 
-    int m_eventNumber;                           ///< To track the current event number
-    float m_deltaRayLengthThresholdSquared;      ///< Threshold for defining small delta rays that will be folded to the parent particle
-    float m_deltaRayParentWeightThreshold;       ///< Threshold for weight contribution of parent particle for it take the delta ray's hit
+    // members
+    int m_eventNumber;                      ///< To track the current event number
+    float m_deltaRayLengthThresholdSquared; ///< Threshold for defining small delta rays that will be folded to the parent particle
+    float m_deltaRayParentWeightThreshold;  ///< Threshold for weight contribution of parent particle for it take the delta ray's hit
+
+    // members that may be set from xml
     std::string m_fileName;                      ///< The filename of the ROOT output file
     std::string m_treeName;                      ///< The name of the ROOT tree
     std::vector<std::string> m_caloHitListNames; ///< The names of the hit lists containing all 2D hits
     std::vector<std::string> m_clusterListNames; ///< The names of the lists of 2D clusters to process
     int m_minMCHitsPerView;                      ///< Threshold on total main MCParticle hits in each view for consideration in metric calculations
-    bool m_onlyRandIndices;                      ///< Flag to only calculate the ajusted rand index for track/shower/all particles
-    bool m_onlyRandIndex;                        ///< Flag to only calculate the ajusted rand index over all particles
-    bool m_foldShowers;                          ///< Flag to fold shower MC particles to their leading shower MC partilce
+    bool m_onlyRandIndex;                        ///< Flag to only calculate the adjusted rand index over all particles
+    bool m_foldShowers;                          ///< Flag to fold shower MC particles to their leading shower MCParticle
     bool m_handleDeltaRays;                      ///< Flag to fold short delta rays + ignore contributions from daughter electrons that overlap with their parent
     bool m_mergeShowerClustersForRandIndex;      ///< Flag to merge shower-matched clusters into leading shower MC particle for rand index calculation, note this is only makes any sense for showers folded in the simulation or with m_foldShowers
     bool m_visualize;                            ///< Flag display the target clustering derived from MC particles
+    bool m_matchedParticleMetrics;               ///< Flag calculate a set of high level clustering metrics by truth-matching clusters
+    bool m_trackShowerOnlyMetrics;               ///< Flag calculate metrics considering track and shower hits independently as well as all hits together
 };
 
 } // namespace lar_content
