@@ -179,10 +179,32 @@ StatusCode EventClusterValidationAlgorithm::Run()
 void EventClusterValidationAlgorithm::GetHitParents(
     const CaloHitList &caloHits, const ClusterList &clusters, std::map<const CaloHit *const, CaloHitParents> &hitParents) const
 {
+    std::map<const MCParticle *const, const MCParticle *const> mcFoldTo;
     for (const CaloHit *const pCaloHit : caloHits)
     {
+        MCParticleWeightMap weightMap{pCaloHit->GetMCParticleWeightMap()};
+
+        if(m_foldShowers)
+        {
+            MCParticleWeightMap foldedWeightMap;
+            for (const auto &[pMC, weight] : weightMap)
+            {
+                const MCParticle *pFoldedMC{nullptr};
+                if (mcFoldTo.find(pMC) != mcFoldTo.end())
+                {
+                     pFoldedMC = mcFoldTo.at(pMC);
+                }
+                else
+                {
+                    pFoldedMC = this->FoldMCTo(pMC);
+                    mcFoldTo.insert({pMC, pFoldedMC});
+                }
+                foldedWeightMap[pFoldedMC] += weight;
+            }
+            weightMap = foldedWeightMap;
+        }
+
         const MCParticle *pMainMC{nullptr};
-        const MCParticleWeightMap &weightMap{pCaloHit->GetMCParticleWeightMap()};
         float maxWeight{0.f};
         for (const auto &[pMC, weight] : weightMap)
         {
@@ -203,14 +225,6 @@ void EventClusterValidationAlgorithm::GetHitParents(
         {
             hitParents[pCaloHit] = CaloHitParents();
             hitParents[pCaloHit].m_pMainMC = pMainMC;
-        }
-    }
-
-    if (m_foldShowers)
-    {
-        for (auto &[pCaloHit, parents] : hitParents)
-        {
-            parents.m_pMainMC = this->FoldMCTo(parents.m_pMainMC);
         }
     }
 
