@@ -144,13 +144,20 @@ StatusCode EventClusterValidationAlgorithm::Run()
 
         if (m_visualize)
         {
+            std::cout << "-- view " << (view == TPC_VIEW_U ? "U" : (view == TPC_VIEW_V ? "V" : "W")) << "\n";
+            std::cout << "Drawing target true clustering...\n";
             this->VisualizeTargetClusters(hitParents);
         }
 
         for (const ValidationType valType : valTypes)
         {
             // Apply the track/shower/all criteria
-            std::map<const CaloHit *const, CaloHitParents> hitParentsValid{ApplyPDGCut(hitParents, valType)};
+            std::map<const CaloHit *const, CaloHitParents> hitParentsValid{ApplyTrackShowerCut(hitParents, valType)};
+            if (m_visualize && (valType == ValidationType::TRACK || valType == ValidationType::SHOWER))
+            {
+                std::cout << "---- Drawing clusters relevant to " << (valType == ValidationType::SHOWER ? "shower" : "track") << "hits...\n";
+                this->VisualizeTargetClusters(hitParentsValid);
+            }
 
             ClusterMetrics clusterMetrics;
             GetClusterMetrics(hitParentsValid, clusterMetrics);
@@ -424,19 +431,25 @@ void EventClusterValidationAlgorithm::ApplyMCParticleMinSumHits(std::map<const C
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-std::map<const CaloHit *const, EventClusterValidationAlgorithm::CaloHitParents> EventClusterValidationAlgorithm::ApplyPDGCut(
+std::map<const CaloHit *const, EventClusterValidationAlgorithm::CaloHitParents> EventClusterValidationAlgorithm::ApplyTrackShowerCut(
     std::map<const CaloHit *const, CaloHitParents> &hitParents, const ValidationType &valType) const
 {
     std::map<const CaloHit *const, CaloHitParents> hitParentsValid;
     for (const auto &[pCaloHit, parents] : hitParents)
     {
         const MCParticle *const pMainMC{parents.m_pMainMC};
+        const MCParticle *const pClusterMainMC{parents.m_pClusterMainMC};
         if (valType != ValidationType::ALL)
         {
-            const int pdg{std::abs(pMainMC->GetParticleId())};
-            if ((valType == ValidationType::SHOWER && (pdg != PHOTON && pdg != E_MINUS)) ||
-                (valType == ValidationType::TRACK && (pdg == PHOTON || pdg == E_MINUS)))
+            const int mainPdg{std::abs(pMainMC->GetParticleId())};
+            const bool mainIsShower{mainPdg == PHOTON || mainPdg == E_MINUS};
+            const int clusterMainPdg{std::abs(pClusterMainMC->GetParticleId())};
+            const bool clusterMainIsShower{clusterMainPdg == PHOTON || clusterMainPdg == E_MINUS};
+            if ((valType == ValidationType::SHOWER && !mainIsShower && !clusterMainIsShower) ||
+                (valType == ValidationType::TRACK && mainIsShower && clusterMainIsShower))
+            {
                 continue;
+            }
         }
         hitParentsValid[pCaloHit] = parents;
     }
@@ -666,6 +679,7 @@ double EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *co
 
     if (m_visualize && m_mergeShowerClustersForRandIndex) // This is only worth seeing if the cheated merging has occurred
     {
+        std::cout << "---- Drawing reco clusters used in Rand Index calculation...\n";
         this->VisualizeRandIndexRecoClusters(hitParents, hitMergeTarget);
     }
 

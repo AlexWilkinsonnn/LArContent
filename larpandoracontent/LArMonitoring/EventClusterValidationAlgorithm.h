@@ -172,12 +172,13 @@ private:
     void ApplyMCParticleMinSumHits(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
 
     /**
-     *  @brief Erase hits not associated with an MCParticle PDG incompatible with track/shower/all
+     *  @brief Erase hits not associated with track/shower/all validation type.
+     *         Association comes from the main MCParticle contributing to the hit or to the cluster the hit is in.
      *
      *  @param[in] hitParents Map of hits to the Cluster/MCParticle they belong to
      *  @param[in] valType    Enum for track/shower/all
      */
-    std::map<const pandora::CaloHit *const, CaloHitParents> ApplyPDGCut(
+    std::map<const pandora::CaloHit *const, CaloHitParents> ApplyTrackShowerCut(
         std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, const ValidationType &valType) const;
 
     /**
