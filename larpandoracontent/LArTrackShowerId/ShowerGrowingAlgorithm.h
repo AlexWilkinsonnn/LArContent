@@ -155,6 +155,9 @@ private:
     float m_maxVertexLongitudinalDistance; ///< Vertex association check: max longitudinal distance cut
     float m_maxVertexTransverseDistance;   ///< Vertex association check: max transverse distance cut
     float m_vertexAngularAllowance;        ///< Vertex association check: pointing angular allowance in degrees
+
+    bool m_cheatAssociation; ///< Cheat the AreClustersAssociated method
+    bool m_visualise;        ///< Visualise the merge decisions
 };
 
 } // namespace lar_content

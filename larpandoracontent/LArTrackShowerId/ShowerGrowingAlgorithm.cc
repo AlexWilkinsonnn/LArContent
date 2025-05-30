@@ -31,7 +31,9 @@ ShowerGrowingAlgorithm::ShowerGrowingAlgorithm() :
     m_minVertexLongitudinalDistance(-2.5f),
     m_maxVertexLongitudinalDistance(20.f),
     m_maxVertexTransverseDistance(1.5f),
-    m_vertexAngularAllowance(3.f)
+    m_vertexAngularAllowance(3.f),
+    m_cheatAssociation(false),
+    m_visualise(false)
 {
 }
 
@@ -259,15 +261,37 @@ void ShowerGrowingAlgorithm::ProcessBranchClusters(const Cluster *const pParentC
 {
     m_clusterDirectionMap.erase(pParentCluster);
 
+    if (m_visualise)
+    {
+        std::cout << "-- " << pParentCluster << " <- " << branchClusters.size() << "\n";
+        const ClusterList visClusters{pParentCluster};
+        PANDORA_MONITORING_API(VisualizeClusters(
+            this->GetPandora(), &visClusters, "Branches: " + std::to_string(branchClusters.size()), RED));
+        const CartesianVector visMarkerPosition{pParentCluster->GetCentroid(pParentCluster->GetOuterPseudoLayer())};
+        PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &visMarkerPosition, "Seed", RED, 2));
+    }
+    const CartesianVector parentPosition{pParentCluster->GetCentroid(pParentCluster->GetOuterPseudoLayer())};
     for (const Cluster *const pBranchCluster : branchClusters)
     {
         if (pBranchCluster->IsAvailable())
         {
+            if (m_visualise)
+            {
+                const CartesianVector branchPosition{LArClusterHelper::GetClosestPosition(parentPosition, pBranchCluster)};
+                const ClusterList visClusters{pBranchCluster};
+                PANDORA_MONITORING_API(VisualizeClusters(this->GetPandora(), &visClusters, "", BLUE));
+                PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &branchPosition, "Branch", BLUE, 2));
+                PANDORA_MONITORING_API(AddLineToVisualization(this->GetPandora(), &parentPosition, &branchPosition, "Merge", BLACK, 2, 1));
+            }
             PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=,
                 PandoraContentApi::MergeAndDeleteClusters(*this, pParentCluster, pBranchCluster, listName, listName));
         }
 
         m_clusterDirectionMap.erase(pBranchCluster);
+    }
+    if (m_visualise)
+    {
+        PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
     }
 }
 
@@ -275,6 +299,10 @@ void ShowerGrowingAlgorithm::ProcessBranchClusters(const Cluster *const pParentC
 
 ShowerGrowingAlgorithm::AssociationType ShowerGrowingAlgorithm::AreClustersAssociated(const Cluster *const pClusterSeed, const Cluster *const pCluster) const
 {
+    if (m_cheatAssociation)
+    {
+    }
+
     const VertexList *pVertexList(nullptr);
     PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetCurrentList(*this, pVertexList));
     const Vertex *const pVertex(
@@ -455,6 +483,12 @@ StatusCode ShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "VertexAngularAllowance", m_vertexAngularAllowance));
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "CheatAssociation", m_cheatAssociation));
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "Visualise", m_visualise));
 
     return BranchGrowingAlgorithm::ReadSettings(xmlHandle);
 }
