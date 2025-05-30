@@ -165,7 +165,7 @@ StatusCode EventClusterValidationAlgorithm::Run()
             double adjustedRandI{CalcRandIndex(hitParentsValid)};
 
             MatchedParticleMetrics matchedParticleMetrics;
-            if (m_matchedParticleMetrics)
+            if (m_matchedParticleMetrics && valType == ValidationType::ALL)
             {
                 this->GetMatchedParticleMetrics(hitParentsValid, matchedParticleMetrics);
             }
@@ -443,12 +443,24 @@ std::map<const CaloHit *const, EventClusterValidationAlgorithm::CaloHitParents> 
         {
             const int mainPdg{std::abs(pMainMC->GetParticleId())};
             const bool mainIsShower{mainPdg == PHOTON || mainPdg == E_MINUS};
-            const int clusterMainPdg{std::abs(pClusterMainMC->GetParticleId())};
-            const bool clusterMainIsShower{clusterMainPdg == PHOTON || clusterMainPdg == E_MINUS};
-            if ((valType == ValidationType::SHOWER && !mainIsShower && !clusterMainIsShower) ||
-                (valType == ValidationType::TRACK && mainIsShower && clusterMainIsShower))
+            // Hit may have no reco cluster causing this to happen
+            // NOTE In future metric calculations no reco cluster is being treated as belonging to the null cluster
+            if (!pClusterMainMC)
             {
-                continue;
+                if ((valType == ValidationType::SHOWER && !mainIsShower) || (valType == ValidationType::TRACK && mainIsShower))
+                {
+                    continue;
+                }
+            }
+            else
+            {
+                const int clusterMainPdg{std::abs(pClusterMainMC->GetParticleId())};
+                const bool clusterMainIsShower{clusterMainPdg == PHOTON || clusterMainPdg == E_MINUS};
+                if ((valType == ValidationType::SHOWER && !mainIsShower && !clusterMainIsShower) ||
+                    (valType == ValidationType::TRACK && mainIsShower && clusterMainIsShower))
+                {
+                    continue;
+                }
             }
         }
         hitParentsValid[pCaloHit] = parents;
@@ -517,7 +529,7 @@ void EventClusterValidationAlgorithm::GetClusterMetrics(
         // Determine which MC particle contributes the most weight across the cluster
         const MCParticle *pMainMC{nullptr};
         int maxHits{0};
-        for (const auto &[pMC, nHits] : mainMCParticleHits)  // XXX not accounting for ties
+        for (const auto &[pMC, nHits] : mainMCParticleHits)
         {
             if (nHits > maxHits)
             {
