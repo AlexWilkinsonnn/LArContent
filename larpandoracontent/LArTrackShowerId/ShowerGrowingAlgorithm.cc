@@ -15,6 +15,9 @@
 
 #include "larpandoracontent/LArObjects/LArPointingCluster.h"
 
+#include "Helpers/MCParticleHelper.h"
+#include "larpandoracontent/LArHelpers/LArMCParticleHelper.h"
+
 #include "larpandoracontent/LArTrackShowerId/ShowerGrowingAlgorithm.h"
 
 using namespace pandora;
@@ -301,6 +304,39 @@ ShowerGrowingAlgorithm::AssociationType ShowerGrowingAlgorithm::AreClustersAssoc
 {
     if (m_cheatAssociation)
     {
+        // - Get the main folded mc particle for each cluster and the purity of the cluster
+        // - Associated if main folded mc particles are shower particles and the same
+        // - Strength of the association depends on how pure each of the clusters are
+        const MCParticle *pSeedMainMC{nullptr}, *pBranchMainMC{nullptr};
+        float seedPurity, branchPurity;
+        try
+        {
+            this->GetMainMCAndPurity(pClusterSeed, pSeedMainMC, seedPurity);
+            this->GetMainMCAndPurity(pCluster, pBranchMainMC, branchPurity);
+        }
+        catch (const StatusCodeException &e)
+        {
+            if (e.GetStatusCode() == STATUS_CODE_NOT_INITIALIZED)
+            {
+                return NONE;
+            }
+            throw;
+        }
+
+        // std::cout << pSeedMainMC << ", " << seedPurity << " -- " << pBranchMainMC << ", " << branchPurity << " -> " << (pSeedMainMC == pBranchMainMC) << "\n";
+        if (pSeedMainMC == pBranchMainMC)
+        {
+            if (seedPurity > 0.8 && branchPurity > 0.8)
+            {
+                return STRONG;
+            }
+            else if (seedPurity > 0.5 && branchPurity > 0.5)
+            {
+                return STANDARD;
+            }
+        }
+
+        return NONE;
     }
 
     const VertexList *pVertexList(nullptr);
@@ -449,6 +485,139 @@ unsigned int ShowerGrowingAlgorithm::GetNVertexConnections(const CartesianVector
     }
 
     return nConnections;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+const MCParticle* ShowerGrowingAlgorithm::FoldMCTo(const MCParticle *const pMC) const
+{
+    const int pdg{std::abs(pMC->GetParticleId())};
+    if (pdg != PHOTON && pdg != E_MINUS)
+    {
+        return pMC;
+    }
+    bool hasAncestorElectron{false};
+
+    const MCParticle *pCurrentMC{pMC};
+    const MCParticle *pLeadingMC{pMC};
+    while (!pCurrentMC->IsRootParticle())
+    {
+        const MCParticle *const pParentMC{*(pCurrentMC->GetParentList().begin())};
+        const int parentPdg{std::abs(pParentMC->GetParticleId())};
+        if (parentPdg == PHOTON || parentPdg == E_MINUS)
+        {
+            if (parentPdg == E_MINUS)
+            {
+                hasAncestorElectron = true;
+            }
+            pCurrentMC = pParentMC;
+            continue;
+        }
+        pLeadingMC = pCurrentMC;
+        break;
+    }
+
+    // Don't fold "showers" that consist of only compton scatters
+    // Trying to prevents distant diffuse hits disconnected from a "real" bremm + pair production shower being clustered together
+    if (hasAncestorElectron || std::abs(pLeadingMC->GetParticleId()) == E_MINUS)
+    {
+        return pLeadingMC;
+    }
+    else if (this->CausesShower(pLeadingMC, 0))
+    {
+        return pLeadingMC;
+    }
+    else
+    {
+        return pMC;
+    }
+}
+
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+bool ShowerGrowingAlgorithm::CausesShower(const MCParticle *const pMC, int nDescendentElectrons) const
+{
+    if (nDescendentElectrons > 1)
+    {
+        return true;
+    }
+
+    if (std::abs(pMC->GetParticleId()) == E_MINUS)
+    {
+        nDescendentElectrons++; // Including the parent particle, ie. the first in the recursion, as a descendent
+    }
+    for (const MCParticle *pChildMC : pMC->GetDaughterList())
+    {
+        if(this->CausesShower(pChildMC, nDescendentElectrons))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode ShowerGrowingAlgorithm::GetMainMCAndPurity(const Cluster *const pCluster, const MCParticle *&pMainMC, float &purity) const
+{
+    const CaloHitList &isolatedHits{pCluster->GetIsolatedCaloHitList()};
+    CaloHitList clusterCaloHits;
+    pCluster->GetOrderedCaloHitList().FillCaloHitList(clusterCaloHits);
+    clusterCaloHits.insert(clusterCaloHits.end(), isolatedHits.begin(), isolatedHits.end());
+
+    std::map<const MCParticle *, int> mainMCParticleNHits;
+    std::map<const MCParticle *const, const MCParticle *const> mcFoldTo;
+    for (const CaloHit *const pCaloHit : clusterCaloHits)
+    {
+        const MCParticle *const pMC = MCParticleHelper::GetMainMCParticle(pCaloHit);
+
+        const MCParticle *pFoldedMC{nullptr};
+        if (mcFoldTo.find(pMC) != mcFoldTo.end())
+        {
+             pFoldedMC = mcFoldTo.at(pMC);
+        }
+        else
+        {
+            pFoldedMC = this->FoldMCTo(pMC);
+            mcFoldTo.insert({pMC, pFoldedMC});
+        }
+
+        if (mainMCParticleNHits.find(pFoldedMC) == mainMCParticleNHits.end())
+        {
+            mainMCParticleNHits[pFoldedMC] = 0;
+        }
+        mainMCParticleNHits.at(pFoldedMC)++;
+    }
+
+    int maxHits{0};
+    for (const auto &[pMC, nHits] : mainMCParticleNHits)
+    {
+        if (nHits > maxHits)
+        {
+            pMainMC = pMC;
+            maxHits = nHits;
+        }
+        else if (nHits == maxHits) // tie-breaker
+        {
+            if (LArMCParticleHelper::SortByMomentum(pMC, pMainMC))
+            {
+                pMainMC = pMC;
+            }
+        }
+    }
+
+    int nom{0}, denom{0};
+    for (const auto &[pMC, nHits] : mainMCParticleNHits)
+    {
+        denom++;
+        if (pMC == pMainMC)
+        {
+            nom++;
+        }
+    }
+    purity = static_cast<float>(nom) / denom;
+
+    return STATUS_CODE_SUCCESS;
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------

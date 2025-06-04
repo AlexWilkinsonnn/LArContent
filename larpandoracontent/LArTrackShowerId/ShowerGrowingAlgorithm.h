@@ -140,6 +140,12 @@ private:
      */
     unsigned int GetNVertexConnections(const pandora::CartesianVector &vertexPosition2D, const LArPointingClusterList &pointingClusterList) const;
 
+    const pandora::MCParticle* FoldMCTo(const pandora::MCParticle *const pMC) const;
+
+    bool CausesShower(const pandora::MCParticle *const pMC, int nDescendentElectrons) const;
+
+    pandora::StatusCode GetMainMCAndPurity(const pandora::Cluster *const pCluster, const pandora::MCParticle *&pMainMC, float &purity) const;
+
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
 
     pandora::StringVector m_inputClusterListNames; ///< The names of the input cluster lists
