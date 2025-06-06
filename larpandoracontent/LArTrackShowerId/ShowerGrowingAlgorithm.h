@@ -140,11 +140,13 @@ private:
      */
     unsigned int GetNVertexConnections(const pandora::CartesianVector &vertexPosition2D, const LArPointingClusterList &pointingClusterList) const;
 
-    const pandora::MCParticle* FoldMCTo(const pandora::MCParticle *const pMC) const;
+    const pandora::MCParticle* FoldMCTo(const pandora::MCParticle *const pMC, int &tier) const;
 
     bool CausesShower(const pandora::MCParticle *const pMC, int nDescendentElectrons) const;
 
     pandora::StatusCode GetMainMCAndPurity(const pandora::Cluster *const pCluster, const pandora::MCParticle *&pMainMC, float &purity) const;
+
+    void GetCheatedSeedCandidates(const pandora::ClusterList *const pClusterList, pandora::ClusterVector &seedClusters) const;
 
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
 
@@ -163,6 +165,8 @@ private:
     float m_vertexAngularAllowance;        ///< Vertex association check: pointing angular allowance in degrees
 
     bool m_cheatAssociation; ///< Cheat the AreClustersAssociated method
+    bool m_cheatSeeds;       ///< Cheat the shower seed identification (use the largest cluster from the leading electron(s))
+    bool m_cheatShowerId;    ///< Cheat the identification of a cluster as shower or not
     bool m_visualise;        ///< Visualise the merge decisions
 };
 

@@ -36,6 +36,8 @@ ShowerGrowingAlgorithm::ShowerGrowingAlgorithm() :
     m_maxVertexTransverseDistance(1.5f),
     m_vertexAngularAllowance(3.f),
     m_cheatAssociation(false),
+    m_cheatSeeds(false),
+    m_cheatShowerId(false),
     m_visualise(false)
 {
 }
@@ -111,6 +113,18 @@ void ShowerGrowingAlgorithm::SimpleModeShowerGrowing(const ClusterList *const pC
 
     ClusterSet usedClusters;
 
+    if (m_cheatSeeds)
+    {
+        ClusterVector seedClusters;
+        this->GetCheatedSeedCandidates(pClusterList, seedClusters);
+
+        SeedAssociationList seedAssociationList;
+        this->GetSeedAssociationList(seedClusters, pClusterList, seedAssociationList);
+        this->ProcessSeedAssociationDetails(seedAssociationList, clusterListName, usedClusters);
+
+        return;
+    }
+
     // Pick up all showers starting at vertex
     if (pVertex)
     {
@@ -148,8 +162,30 @@ bool ShowerGrowingAlgorithm::GetNextSeedCandidate(const ClusterList *const pClus
         if (!pCluster->IsAvailable())
             continue;
 
-        if (MU_MINUS == std::abs(pCluster->GetParticleId()))
+        if (m_cheatShowerId)
+        {
+            try
+            {
+                const MCParticle *const pMC{MCParticleHelper::GetMainMCParticle(pCluster)};
+                const int pdg{std::abs(pMC->GetParticleId())};
+                if (pdg != E_MINUS && pdg != PHOTON)
+                {
+                    continue;
+                }
+            }
+            catch (const StatusCodeException &e)
+            {
+                if (e.GetStatusCode() == STATUS_CODE_NOT_FOUND)
+                {
+                    continue;
+                }
+                throw;
+            }
+        }
+        else if (MU_MINUS == std::abs(pCluster->GetParticleId()))
+        {
             continue;
+        }
 
         if (pCluster->GetNCaloHits() < m_minCaloHitsPerCluster)
             continue;
@@ -182,8 +218,30 @@ void ShowerGrowingAlgorithm::GetAllVertexSeedCandidates(const ClusterList *const
         if (!pCluster->IsAvailable())
             continue;
 
-        if (MU_MINUS == std::abs(pCluster->GetParticleId()))
+        if (m_cheatShowerId)
+        {
+            try
+            {
+                const MCParticle *const pMC{MCParticleHelper::GetMainMCParticle(pCluster)};
+                const int pdg{std::abs(pMC->GetParticleId())};
+                if (pdg != E_MINUS && pdg != PHOTON)
+                {
+                    continue;
+                }
+            }
+            catch (const StatusCodeException &e)
+            {
+                if (e.GetStatusCode() == STATUS_CODE_NOT_FOUND)
+                {
+                    continue;
+                }
+                throw;
+            }
+        }
+        else if (MU_MINUS == std::abs(pCluster->GetParticleId()))
+        {
             continue;
+        }
 
         if (pCluster->GetNCaloHits() < m_minCaloHitsPerCluster)
             continue;
@@ -217,8 +275,30 @@ void ShowerGrowingAlgorithm::GetSeedAssociationList(
         if (!pCandidateCluster->IsAvailable())
             continue;
 
-        if (MU_MINUS == std::abs(pCandidateCluster->GetParticleId()))
+        if (m_cheatShowerId)
+        {
+            try
+            {
+                const MCParticle *const pMC{MCParticleHelper::GetMainMCParticle(pCandidateCluster)};
+                const int pdg{std::abs(pMC->GetParticleId())};
+                if (pdg != E_MINUS && pdg != PHOTON)
+                {
+                    continue;
+                }
+            }
+            catch (const StatusCodeException &e)
+            {
+                if (e.GetStatusCode() == STATUS_CODE_NOT_FOUND)
+                {
+                    continue;
+                }
+                throw;
+            }
+        }
+        else if (MU_MINUS == std::abs(pCandidateCluster->GetParticleId()))
+        {
             continue;
+        }
 
         if (pCandidateCluster->GetNCaloHits() < m_minCaloHitsPerCluster)
             continue;
@@ -304,9 +384,6 @@ ShowerGrowingAlgorithm::AssociationType ShowerGrowingAlgorithm::AreClustersAssoc
 {
     if (m_cheatAssociation)
     {
-        // - Get the main folded mc particle for each cluster and the purity of the cluster
-        // - Associated if main folded mc particles are shower particles and the same
-        // - Strength of the association depends on how pure each of the clusters are
         const MCParticle *pSeedMainMC{nullptr}, *pBranchMainMC{nullptr};
         float seedPurity, branchPurity;
         try
@@ -323,14 +400,13 @@ ShowerGrowingAlgorithm::AssociationType ShowerGrowingAlgorithm::AreClustersAssoc
             throw;
         }
 
-        // std::cout << pSeedMainMC << ", " << seedPurity << " -- " << pBranchMainMC << ", " << branchPurity << " -> " << (pSeedMainMC == pBranchMainMC) << "\n";
         if (pSeedMainMC == pBranchMainMC)
         {
-            if (seedPurity > 0.8 && branchPurity > 0.8)
+            if (seedPurity > 0.5 && branchPurity > 0.5)
             {
                 return STRONG;
             }
-            else if (seedPurity > 0.5 && branchPurity > 0.5)
+            else
             {
                 return STANDARD;
             }
@@ -488,7 +564,8 @@ unsigned int ShowerGrowingAlgorithm::GetNVertexConnections(const CartesianVector
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
-const MCParticle* ShowerGrowingAlgorithm::FoldMCTo(const MCParticle *const pMC) const
+
+const MCParticle* ShowerGrowingAlgorithm::FoldMCTo(const MCParticle *const pMC, int &tier) const
 {
     const int pdg{std::abs(pMC->GetParticleId())};
     if (pdg != PHOTON && pdg != E_MINUS)
@@ -499,8 +576,10 @@ const MCParticle* ShowerGrowingAlgorithm::FoldMCTo(const MCParticle *const pMC) 
 
     const MCParticle *pCurrentMC{pMC};
     const MCParticle *pLeadingMC{pMC};
+    tier = 0;
     while (!pCurrentMC->IsRootParticle())
     {
+        tier++;
         const MCParticle *const pParentMC{*(pCurrentMC->GetParentList().begin())};
         const int parentPdg{std::abs(pParentMC->GetParticleId())};
         if (parentPdg == PHOTON || parentPdg == E_MINUS)
@@ -528,6 +607,7 @@ const MCParticle* ShowerGrowingAlgorithm::FoldMCTo(const MCParticle *const pMC) 
     }
     else
     {
+        tier = -1;
         return pMC;
     }
 }
@@ -569,7 +649,7 @@ StatusCode ShowerGrowingAlgorithm::GetMainMCAndPurity(const Cluster *const pClus
     std::map<const MCParticle *const, const MCParticle *const> mcFoldTo;
     for (const CaloHit *const pCaloHit : clusterCaloHits)
     {
-        const MCParticle *const pMC = MCParticleHelper::GetMainMCParticle(pCaloHit);
+        const MCParticle *const pMC{MCParticleHelper::GetMainMCParticle(pCaloHit)};
 
         const MCParticle *pFoldedMC{nullptr};
         if (mcFoldTo.find(pMC) != mcFoldTo.end())
@@ -578,7 +658,8 @@ StatusCode ShowerGrowingAlgorithm::GetMainMCAndPurity(const Cluster *const pClus
         }
         else
         {
-            pFoldedMC = this->FoldMCTo(pMC);
+            int tier;
+            pFoldedMC = this->FoldMCTo(pMC, tier);
             mcFoldTo.insert({pMC, pFoldedMC});
         }
 
@@ -622,6 +703,83 @@ StatusCode ShowerGrowingAlgorithm::GetMainMCAndPurity(const Cluster *const pClus
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
+void ShowerGrowingAlgorithm::GetCheatedSeedCandidates(const ClusterList *const pClusterList, ClusterVector &seedClusters) const
+{
+    ClusterVector clusterVector;
+    clusterVector.insert(clusterVector.end(), pClusterList->begin(), pClusterList->end());
+
+    if (clusterVector.empty())
+        return;
+
+    std::map<const MCParticle *const, const Cluster *> bestSeed;
+    std::map<const MCParticle *const, int> seedTier;
+    for (const Cluster *const pCluster : clusterVector)
+    {
+        if (!pCluster->IsAvailable())
+        {
+            continue;
+        }
+
+        const MCParticle *pMC{nullptr};
+        int pdg;
+        try
+        {
+            pMC = MCParticleHelper::GetMainMCParticle(pCluster);
+            pdg = std::abs(pMC->GetParticleId());
+        }
+        catch (const StatusCodeException &e)
+        {
+            if (e.GetStatusCode() == STATUS_CODE_NOT_FOUND)
+            {
+                continue;
+            }
+            throw;
+        }
+        if (!pMC)
+        {
+            continue;
+        }
+
+        if ((pdg != E_MINUS && pdg != PHOTON) || !this->CausesShower(pMC, 0))
+        {
+            continue;
+        }
+
+        if (pCluster->GetNCaloHits() < m_minCaloHitsPerCluster)
+        {
+            continue;
+        }
+
+        int tier;
+        const MCParticle *const pLeadingMC{this->FoldMCTo(pMC, tier)};
+        if (tier == -1)
+        {
+            continue;
+        }
+
+        if (bestSeed.find(pLeadingMC) == bestSeed.end())
+        {
+            bestSeed.insert({pLeadingMC, pCluster});
+            seedTier.insert({pLeadingMC, tier});
+            continue;
+        }
+
+        if (tier <= seedTier.at(pLeadingMC) && LArClusterHelper::SortByNHits(pCluster, bestSeed.at(pLeadingMC)))
+        {
+            bestSeed.at(pLeadingMC) = pCluster;
+            seedTier.at(pLeadingMC) = tier;
+        }
+    }
+
+    for (const auto &[pMC, pCluster] : bestSeed)
+    {
+        seedClusters.push_back(pCluster);
+    }
+    std::sort(seedClusters.begin(), seedClusters.end(), ShowerGrowingAlgorithm::SortClusters);
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
 StatusCode ShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
 {
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "InputClusterListNames", m_inputClusterListNames));
@@ -655,6 +813,10 @@ StatusCode ShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "CheatAssociation", m_cheatAssociation));
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "CheatSeeds", m_cheatSeeds));
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "CheatShowerId", m_cheatShowerId));
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "Visualise", m_visualise));
