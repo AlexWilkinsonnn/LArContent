@@ -148,6 +148,8 @@ private:
 
     void GetCheatedSeedCandidates(const pandora::ClusterList *const pClusterList, pandora::ClusterVector &seedClusters) const;
 
+    void CheatClusters(const pandora::ClusterList *const pClusterList, const std::string &clusterListName) const;
+
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
 
     pandora::StringVector m_inputClusterListNames; ///< The names of the input cluster lists
@@ -167,7 +169,9 @@ private:
     bool m_cheatAssociation; ///< Cheat the AreClustersAssociated method
     bool m_cheatSeeds;       ///< Cheat the shower seed identification (use the largest cluster from the leading electron(s))
     bool m_cheatShowerId;    ///< Cheat the identification of a cluster as shower or not
-    bool m_visualise;        ///< Visualise the merge decisions
+    bool m_cheatClusters;    ///< Cheat the clusters ie. cheat everything by reclustering according to leading shower mc particle
+
+    bool m_visualise; ///< Visualise the merge decisions
 };
 
 } // namespace lar_content

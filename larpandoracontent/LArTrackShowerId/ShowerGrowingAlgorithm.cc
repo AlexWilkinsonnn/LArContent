@@ -38,6 +38,7 @@ ShowerGrowingAlgorithm::ShowerGrowingAlgorithm() :
     m_cheatAssociation(false),
     m_cheatSeeds(false),
     m_cheatShowerId(false),
+    m_cheatClusters(false),
     m_visualise(false)
 {
 }
@@ -89,8 +90,15 @@ StatusCode ShowerGrowingAlgorithm::Run()
                 continue;
             }
 
-            this->SimpleModeShowerGrowing(pClusterList, clusterListName);
-            m_clusterDirectionMap.clear();
+            if (m_cheatClusters)
+            {
+                this->CheatClusters(pClusterList, clusterListName);
+            }
+            else
+            {
+                this->SimpleModeShowerGrowing(pClusterList, clusterListName);
+                m_clusterDirectionMap.clear();
+            }
         }
         catch (StatusCodeException &statusCodeException)
         {
@@ -780,6 +788,13 @@ void ShowerGrowingAlgorithm::GetCheatedSeedCandidates(const ClusterList *const p
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
+void ShowerGrowingAlgorithm::CheatClusters([[maybe_unused]] const ClusterList *const pClusterList,[[maybe_unused]] const std::string &clusterListName) const
+{
+    std::cout << "m_cheatClusters not implemented!!!!\n";
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
 StatusCode ShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
 {
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "InputClusterListNames", m_inputClusterListNames));
@@ -817,6 +832,8 @@ StatusCode ShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "CheatSeeds", m_cheatSeeds));
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "CheatShowerId", m_cheatShowerId));
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "CheatClusters", m_cheatClusters));
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "Visualise", m_visualise));
