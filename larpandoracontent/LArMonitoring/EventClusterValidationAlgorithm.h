@@ -31,6 +31,21 @@ private:
         int m_nMainMCs;
     };
 
+    struct ClusterMetricsSPINELike
+    {
+        ClusterMetricsSPINELike();
+
+        double m_purity;
+        double m_showerPurity;
+        double m_trackPurity;
+        double m_completeness;
+        double m_showerCompleteness;
+        double m_trackCompleteness;
+        double m_ari;
+        double m_showerAri;
+        double m_trackAri;
+    };
+
     struct MatchedParticleMetrics
     {
         MatchedParticleMetrics();
@@ -85,6 +100,9 @@ private:
      *  @param[out] metrics    Metrics for the clusters in this view
      */
     void GetClusterMetrics(const std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const;
+
+    void GetClusterMetricsSPINELike(
+        const std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, ClusterMetricsSPINELike &metrics) const;
 
     /**
      *  @brief Retrieve the metrics for every MCParticle in a view by matching clusters to a true MCParticle
@@ -212,9 +230,10 @@ private:
     bool m_foldShowers;                          ///< Flag to fold shower MC particles to their leading shower MCParticle
     bool m_handleDeltaRays;                      ///< Flag to fold short delta rays + ignore contributions from daughter electrons that overlap with their parent
     bool m_mergeShowerClustersForRandIndex;      ///< Flag to merge shower-matched clusters into leading shower MC particle for rand index calculation, note this is only makes any sense for showers folded in the simulation or with m_foldShowers
-    bool m_visualize;                            ///< Flag display the target clustering derived from MC particles
-    bool m_matchedParticleMetrics;               ///< Flag calculate a set of high level clustering metrics by truth-matching clusters
-    bool m_trackShowerOnlyMetrics;               ///< Flag calculate metrics considering track and shower hits independently as well as all hits together
+    bool m_visualize;                            ///< Flag to display the target clustering derived from MC particles
+    bool m_matchedParticleMetrics;               ///< Flag to calculate a set of high level clustering metrics by truth-matching clusters
+    bool m_trackShowerOnlyMetrics;               ///< Flag to calculate metrics considering track and shower hits independently as well as all hits together
+    bool m_clusterMetricsSPINELike;              ///< Flag to calculate cluster metrics similar to how SPINE does (arXiv:2007.01335 eqs 7 & 8)
 };
 
 } // namespace lar_content
