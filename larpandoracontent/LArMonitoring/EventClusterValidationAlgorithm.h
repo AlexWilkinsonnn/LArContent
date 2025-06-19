@@ -23,18 +23,6 @@ private:
     {
         ClusterMetrics();
 
-        std::vector<int> m_nRecoHits;
-        std::vector<float> m_purities;
-        std::vector<float> m_completenesses;
-        int m_nHits;
-        int m_nClusters;
-        int m_nMainMCs;
-    };
-
-    struct ClusterMetricsSPINELike
-    {
-        ClusterMetricsSPINELike();
-
         double m_purity;
         double m_showerPurity;
         double m_trackPurity;
@@ -44,6 +32,19 @@ private:
         double m_ari;
         double m_showerAri;
         double m_trackAri;
+        int m_nHits;
+        int m_nHitsNullCluster;
+        int m_nShowerTrueHits;
+        int m_nTrackTrueHits;
+        int m_nRecoClusters;
+        int m_nShowerRecoClusters;
+        int m_nTrackRecoClusters;
+        int m_nTrueClusters;
+        int m_nShowerTrueClusters;
+        int m_nTrackTrueClusters;
+        int m_nAriRecoClusters; // Number of unique clusters that appear in contingency table (can be different due to no cluster-matching and m_mergeShowerClustersForRandIndex)
+        int m_nShowerAriRecoClusters;
+        int m_nTrackAriRecoClusters;
     };
 
     struct MatchedParticleMetrics
@@ -57,13 +58,6 @@ private:
         std::vector<int> m_nTrueHits;
         std::vector<int> m_nMatchedCorrectHits;
         std::vector<int> m_nMatchedTotalHits;
-    };
-
-    enum ValidationType
-    {
-        ALL,
-        SHOWER,
-        TRACK
     };
 
 public:
@@ -94,44 +88,51 @@ private:
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
 
     /**
-     *  @brief Retrieve the metrics of every cluster in a view
+     *  @brief Calculate purity and completeness in this view for all/track/shower reco and true clusters.
+     *         Completeness(purity) sum over true(reco) clusters the maximum intersection with any of the reco(true) clusters.
+     *         According to m_hitWeightedPurityCompleteness, this is either normalised by the number of hits in the true(reco) cluster and
+     *         averaged over the total true(reco) clusters, or not normalised and averaged over the total hits.
      *
-     *  @param[in]  hitParents Map of hits being considered to the Cluster/MCParticle they belong to
-     *  @param[out] metrics    Metrics for the clusters in this view
+     *  @param[in]  hitParents Map of hits being considered to the cluster/MC particle they belong to
+     *  @param[out] metrics    Output Metrics for the clustering in this view
      */
     void GetClusterMetrics(const std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const;
 
-    void GetClusterMetricsSPINELike(
-        const std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, ClusterMetricsSPINELike &metrics) const;
-
     /**
-     *  @brief Retrieve the metrics for every MCParticle in a view by matching clusters to a true MCParticle
+     *  @brief Retrieve the metrics for every MC Particle in a view by matching clusters to a true MC particle
      *
-     *  @param[in]  hitParents Map of hits being considered to the Cluster/MCParticle they belong to
-     *  @param[out] metrics    Metrics for the matched MCParticles in this view
+     *  @param[in]  hitParents Map of hits being considered to the cluster/MC particle they belong to
+     *  @param[out] metrics    Output metrics for the matched MC particles in this view
      */
     void GetMatchedParticleMetrics(
         const std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, MatchedParticleMetrics &metrics) const;
 
     /**
-     *  @brief Calculate Rand Index for the clusters with the clusters of true MCParticles.
-     *          (Ref. for Adjusted Rand Index: https://link.springer.com/article/10.1007/BF01908075)
+     *  @brief Calculate Rand Index for the reoc clusters with the true clusters for all/track/shower hits.
+     *         According to m_mergeShowerClustersForRandIndex, the shower clusters may be merged using cheating prior to the calculation.
+     *         (Ref. for Adjusted Rand Index: https://link.springer.com/article/10.1007/BF01908075).
      *
-     *  @param[in] hitParents Map of hits being considered to the Cluster/MCParticle they belong to
-     *
-     *  @return The value of the rand index
+     *  @param[in]  hitParents Map of hits being considered to the cluster/MC particle they belong to
+     *  @param[out] metrics    Output metrics for the clustering in this view
      */
-    double CalcRandIndex(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
+    void CalcRandIndex(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const;
 
     /**
-     *  @brief Find the cluster and MCParticle each hit belongs to
+     *  @brief Find the cluster and MC particle each hit belongs to
      *
      *  @param[in]  caloHits   List of hits
      *  @param[in]  clusters   List of clusters
-     *  @param[out] hitParents Map of hits to the Cluster/MCParticle they belong to
+     *  @param[out] hitParents Map of hits to the Ccuster/MC particle they belong to
      */
     void GetHitParents(const pandora::CaloHitList &caloHits, const pandora::ClusterList &clusters,
         std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
+
+    /**
+     *  @brief Find the main MC particle for each cluster, this is the MC particle that contributes the most hits
+     *
+     *  @param[in,out] hitParents Map of hits to the cluster/MC particle they belong to
+     */
+    void GetClusterMainMC(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
 
     /**
      *  @brief Tries to identify and deal with impossible-to-cluster-correctly delta ray hits by assigning the hit to the
@@ -165,9 +166,18 @@ private:
     bool CausesShower(const pandora::MCParticle *const pMC, int nDescendentElectrons) const;
 
     /**
+     *  @brief Check if an MC particle is electron or photon,
+     *
+     *  @param[in] pMC he MC particle
+     *
+     *  @return Flag to indicate if the MC particle if EM
+     */
+    bool IsEM(const pandora::MCParticle *const pMC) const;
+
+    /**
      *  @brief Draw the true clusters being compared to
      *
-     *  @param[in] hitParents Map of hits to the Cluster/MCParticle they belong to
+     *  @param[in] hitParents Map of hits to the cluster/MC particle they belong to
      */
     void VisualizeTargetClusters(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
 
@@ -175,7 +185,7 @@ private:
      *  @brief Draw the reco clusters used in the Rand Index calculation. These will be different from the clusters inputted to the
      *         the algorithm if MergeShowerClustersForRandIndex is true.
      *
-     *  @param[in] hitParents Map of hits to the Cluster/MCParticle they belong to
+     *  @param[in] hitParents Map of hits to the cluster/MC particle they belong to
      *  @param[in] hitParents Map of hits to the cluster they merge with for the Rand Index Calculation.
      */
     void VisualizeRandIndexRecoClusters(
@@ -183,37 +193,28 @@ private:
         std::map<const pandora::CaloHit *const, const pandora::Cluster *const> &hitMergeTargets) const;
 
     /**
-     *  @brief Erase hits associated to an MCParticle that does meet a minimum number of hits in the view
+     *  @brief Erase hits associated with an MC particle that does meet a minimum number of hits in the view
      *
-     *  @param[in,out] hitParents Map of hits to the Cluster/MCParticle they belong to
+     *  @param[in,out] hitParents Map of hits to the cluster/MC particle they belong to
      */
     void ApplyMCParticleMinSumHits(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
 
     /**
-     *  @brief Erase hits not associated with track/shower/all validation type.
-     *         Association comes from the main MCParticle contributing to the hit or to the cluster the hit is in.
+     *  @brief Handles hits that do not have a reco cluster, this is usually happens when left behind by the 3D hit creation.
+     *         Will count the number of hits with no reco cluster and, according to m_dropNullClusterHits, may erase them.
      *
-     *  @param[in] hitParents Map of hits to the Cluster/MCParticle they belong to
-     *  @param[in] valType    Enum for track/shower/all
+     *  @param[in,out] hitParents Map of hits to the cluster/MC particle they belong to
      */
-    std::map<const pandora::CaloHit *const, CaloHitParents> ApplyTrackShowerCut(
-        std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, const ValidationType &valType) const;
+    int HandleNullClusterHits(std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
 
     /**
      *  @brief Update the branches of the TTree for this entry
      *
-     *  @param[in] clusterMetrics         Metrics for clusters in the view
-     *  @param[in] matchedParticleMetrics Metrics each particle matched to a cluster in the view
-     *  @param[in] randIdx                Adjusted Rand Index
+     *  @param[in] clusterMetrics         Output metrics for clusters in the view
+     *  @param[in] matchedParticleMetrics Ouptut metrics each particle matched to a cluster in the view
      *  @param[in] view                   The view
-     *  @param[in] branchPrefix           Prefix for the branch name
      */
-    void SetBranches(
-        const ClusterMetrics &metrics,
-        const MatchedParticleMetrics &matchedParticleMetrics,
-        const double randIdx,
-        const int view,
-        const ValidationType valType) const;
+    void SetBranches(const ClusterMetrics &clusterMetrics, const MatchedParticleMetrics &matchedParticleMetrics, const int view) const;
 
     // members
     int m_eventNumber;                      ///< To track the current event number
@@ -232,9 +233,10 @@ private:
     bool m_mergeShowerClustersForRandIndex;      ///< Flag to merge shower-matched clusters into leading shower MC particle for rand index calculation, note this is only makes any sense for showers folded in the simulation or with m_foldShowers
     bool m_visualize;                            ///< Flag to display the target clustering derived from MC particles
     bool m_matchedParticleMetrics;               ///< Flag to calculate a set of high level clustering metrics by truth-matching clusters
-    bool m_trackShowerOnlyMetrics;               ///< Flag to calculate metrics considering track and shower hits independently as well as all hits together
-    bool m_clusterMetricsSPINELike;              ///< Flag to calculate cluster metrics similar to how SPINE does (arXiv:2007.01335 eqs 7 & 8)
+    bool m_dropNullClusterHits;                  ///< Flag to ignore any hits associated with the null cluster
+    bool m_hitWeightedPurityCompleteness;        ///< Flag for cluster purity and completeness to be averaged over hits rather than clusters
 };
+
 
 } // namespace lar_content
 

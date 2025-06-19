@@ -33,18 +33,6 @@ EventClusterValidationAlgorithm::CaloHitParents::CaloHitParents() :
 //------------------------------------------------------------------------------------------------------------------------------------------
 
 EventClusterValidationAlgorithm::ClusterMetrics::ClusterMetrics() :
-    m_nRecoHits{std::vector<int>{}},
-    m_purities{std::vector<float>{}},
-    m_completenesses{std::vector<float>{}},
-    m_nHits{0},
-    m_nClusters{0},
-    m_nMainMCs{0}
-{
-}
-
-//------------------------------------------------------------------------------------------------------------------------------------------
-
-EventClusterValidationAlgorithm::ClusterMetricsSPINELike::ClusterMetricsSPINELike() :
     m_purity{0.},
     m_showerPurity{0.},
     m_trackPurity{0.},
@@ -53,7 +41,20 @@ EventClusterValidationAlgorithm::ClusterMetricsSPINELike::ClusterMetricsSPINELik
     m_trackCompleteness{0.},
     m_ari{0.},
     m_showerAri{0.},
-    m_trackAri{0.}
+    m_trackAri{0.},
+    m_nHits{0},
+    m_nHitsNullCluster{0},
+    m_nShowerTrueHits{0},
+    m_nTrackTrueHits{0},
+    m_nRecoClusters{0},
+    m_nShowerRecoClusters{0},
+    m_nTrackRecoClusters{0},
+    m_nTrueClusters{0},
+    m_nShowerTrueClusters{0},
+    m_nTrackTrueClusters{0},
+    m_nAriRecoClusters{0},
+    m_nShowerAriRecoClusters{0},
+    m_nTrackAriRecoClusters{0}
 {
 }
 
@@ -75,7 +76,7 @@ EventClusterValidationAlgorithm::MatchedParticleMetrics::MatchedParticleMetrics(
 EventClusterValidationAlgorithm::EventClusterValidationAlgorithm() :
     m_eventNumber{0},
     m_deltaRayLengthThresholdSquared{pow(4.67f / 2.f, 2.f)}, // ~half a wire pitch
-    m_deltaRayParentWeightThreshold{0.01f}, // 0.05f
+    m_deltaRayParentWeightThreshold{0.01f},
     m_caloHitListNames{ { "CaloHitList2D" } },
     m_minMCHitsPerView{0},
     m_onlyRandIndex{false},
@@ -84,8 +85,8 @@ EventClusterValidationAlgorithm::EventClusterValidationAlgorithm() :
     m_mergeShowerClustersForRandIndex{false},
     m_visualize{false},
     m_matchedParticleMetrics{false},
-    m_trackShowerOnlyMetrics{false},
-    m_clusterMetricsSPINELike{false}
+    m_dropNullClusterHits{false},
+    m_hitWeightedPurityCompleteness{false}
 {
 }
 
@@ -140,66 +141,55 @@ StatusCode EventClusterValidationAlgorithm::Run()
         }
     }
 
-    std::vector<ValidationType> valTypes{ValidationType::ALL};
-    if (m_trackShowerOnlyMetrics)
-    {
-        valTypes.emplace_back(ValidationType::SHOWER);
-        valTypes.emplace_back(ValidationType::TRACK);
-    }
     for (const auto &[view, caloHits] : viewToCaloHits)
     {
-        const ClusterList &clusters{viewToClusters[view]};
+        if (viewToClusters.find(view) == viewToClusters.end()) // Seen it happen for a 1 hit event
+        {
+            continue;
+        }
+        const ClusterList &clusters{viewToClusters.at(view)};
+
+        ClusterMetrics clusterMetrics;
+        MatchedParticleMetrics matchedParticleMetrics;
 
         // For each hit, get the main MCParticle and the cluster it belongs to (if the truth matching is not missing)
         // NOTE Using hitParents map to track which hits are being considered in metric calculations
         std::map<const CaloHit *const, CaloHitParents> hitParents;
-        GetHitParents(caloHits, clusters, hitParents);
+        this->GetHitParents(caloHits, clusters, hitParents);
+        clusterMetrics.m_nHits = hitParents.size();
 
         // Drop any hits with a main MC particle with insufficient activity
         if (m_minMCHitsPerView > 0)
-            ApplyMCParticleMinSumHits(hitParents);
+        {
+            this->ApplyMCParticleMinSumHits(hitParents);
+        }
+
+        clusterMetrics.m_nHitsNullCluster = this->HandleNullClusterHits(hitParents);
+
+        this->GetClusterMainMC(hitParents);
 
         if (m_visualize)
         {
             std::cout << "-- view " << (view == TPC_VIEW_U ? "U" : (view == TPC_VIEW_V ? "V" : "W")) << "\n";
-            std::cout << "Drawing target true clustering...\n";
+            std::cout << "--- Drawing target true clustering...\n";
             this->VisualizeTargetClusters(hitParents);
         }
 
-        if (m_clusterMetricsSPINELike)
+        this->CalcRandIndex(hitParents, clusterMetrics);
+
+        if (m_onlyRandIndex)
         {
-            ClusterMetricsSPINELike clusterMetricsSPINELike;
-            this->GetClusterMetricsSPINELike(hitParents, clusterMetricsSPINELike);
-            std::cout << "\n";
+            this->SetBranches(clusterMetrics, matchedParticleMetrics, view);
         }
-
-        for (const ValidationType valType : valTypes)
+        else
         {
-            // Apply the track/shower/all criteria
-            std::map<const CaloHit *const, CaloHitParents> hitParentsValid{ApplyTrackShowerCut(hitParents, valType)};
-            if (m_visualize && (valType == ValidationType::TRACK || valType == ValidationType::SHOWER))
+            this->GetClusterMetrics(hitParents, clusterMetrics);
+            if (m_matchedParticleMetrics)
             {
-                std::cout << "---- Drawing clusters relevant to " << (valType == ValidationType::SHOWER ? "shower" : "track") << "hits...\n";
-                this->VisualizeTargetClusters(hitParentsValid);
+                this->GetMatchedParticleMetrics(hitParents, matchedParticleMetrics);
             }
-
-            ClusterMetrics clusterMetrics;
-            GetClusterMetrics(hitParentsValid, clusterMetrics);
-
-            double adjustedRandI{CalcRandIndex(hitParentsValid)};
-
-            MatchedParticleMetrics matchedParticleMetrics;
-            if (m_matchedParticleMetrics && valType == ValidationType::ALL)
-            {
-                this->GetMatchedParticleMetrics(hitParentsValid, matchedParticleMetrics);
-            }
-
-            SetBranches(clusterMetrics, matchedParticleMetrics, adjustedRandI, view, valType);
+            this->SetBranches(clusterMetrics, matchedParticleMetrics, view);
         }
-
-        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "event", m_eventNumber - 1));
-        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "view", static_cast<int>(view)));
-        PANDORA_MONITORING_API(FillTree(this->GetPandora(), m_treeName));
     }
 
     return STATUS_CODE_SUCCESS;
@@ -274,47 +264,13 @@ void EventClusterValidationAlgorithm::GetHitParents(
         pCluster->GetOrderedCaloHitList().FillCaloHitList(clusterCaloHits);
         clusterCaloHits.insert(clusterCaloHits.end(), isolatedHits.begin(), isolatedHits.end());
 
-        std::map<const MCParticle *const, int> mainMCParticleNHits;
         for (const CaloHit *const pCaloHit : clusterCaloHits)
         {
             if (hitParents.find(pCaloHit) == hitParents.end())
             {
                 continue;
             }
-
-            const MCParticle *const pMC = hitParents.at(pCaloHit).m_pMainMC;
-            if (mainMCParticleNHits.find(pMC) == mainMCParticleNHits.end())
-            {
-                mainMCParticleNHits[pMC] = 0;
-            }
-            mainMCParticleNHits.at(pMC)++;
-
             hitParents[pCaloHit].m_pCluster = pCluster;
-        }
-
-        // Store the MC particle that contributes the most hits to the cluster of the hit of interest
-        const MCParticle *pClusterMainMC{nullptr};
-        int maxHits{0};
-        for (const auto &[pMC, nHits] : mainMCParticleNHits)
-        {
-            if (nHits > maxHits)
-            {
-                pClusterMainMC = pMC;
-                maxHits = nHits;
-            }
-            else if (nHits == maxHits) // tie-breaker
-            {
-                if (LArMCParticleHelper::SortByMomentum(pMC, pClusterMainMC))
-                {
-                    pClusterMainMC = pMC;
-                }
-            }
-        }
-        for (const CaloHit *const pCaloHit : clusterCaloHits)
-        {
-            if (hitParents.find(pCaloHit) == hitParents.end())
-                continue;
-            hitParents[pCaloHit].m_pClusterMainMC = pClusterMainMC;
         }
     }
 }
@@ -323,13 +279,12 @@ void EventClusterValidationAlgorithm::GetHitParents(
 
 const MCParticle* EventClusterValidationAlgorithm::FoldMCTo(const MCParticle *const pMC) const
 {
-    const int pdg{std::abs(pMC->GetParticleId())};
-    if (pdg != PHOTON && pdg != E_MINUS)
+    if (!this->IsEM(pMC))
     {
         return pMC;
     }
-    bool hasAncestorElectron{false};
 
+    bool hasAncestorElectron{false};
     const MCParticle *pCurrentMC{pMC};
     const MCParticle *pLeadingMC{pMC};
     while (!pCurrentMC->IsRootParticle())
@@ -380,13 +335,21 @@ bool EventClusterValidationAlgorithm::CausesShower(const MCParticle *const pMC, 
     }
     for (const MCParticle *pChildMC : pMC->GetDaughterList())
     {
-        if(this->CausesShower(pChildMC, nDescendentElectrons))
+        if (this->CausesShower(pChildMC, nDescendentElectrons))
         {
             return true;
         }
     }
 
     return false;
+}
+
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+inline bool EventClusterValidationAlgorithm::IsEM(const pandora::MCParticle *const pMC) const
+{
+    const int pdg{std::abs(pMC->GetParticleId())};
+    return (pdg == E_MINUS || pdg == PHOTON);
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------
@@ -440,68 +403,92 @@ void EventClusterValidationAlgorithm::ApplyMCParticleMinSumHits(std::map<const C
     {
         const MCParticle *const pMainMC{parents.m_pMainMC};
         if (mcSumHits.find(pMainMC) == mcSumHits.end())
+        {
             mcSumHits[pMainMC] = 0;
+        }
         mcSumHits.at(pMainMC)++;
     }
 
     for (auto it = hitParents.begin(); it != hitParents.end();)
     {
         if (mcSumHits.at(it->second.m_pMainMC) < m_minMCHitsPerView)
+        {
             it = hitParents.erase(it);
+        }
         else
+        {
             it++;
+        }
     }
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-std::map<const CaloHit *const, EventClusterValidationAlgorithm::CaloHitParents> EventClusterValidationAlgorithm::ApplyTrackShowerCut(
-    std::map<const CaloHit *const, CaloHitParents> &hitParents, const ValidationType &valType) const
+void EventClusterValidationAlgorithm::GetClusterMainMC(std::map<const CaloHit *const, CaloHitParents> &hitParents) const
 {
-    std::map<const CaloHit *const, CaloHitParents> hitParentsValid;
+    std::map<const Cluster *const, std::map<const MCParticle *const, int>> clusterMainMCNHits;
     for (const auto &[pCaloHit, parents] : hitParents)
     {
-        const MCParticle *const pMainMC{parents.m_pMainMC};
-        if (valType != ValidationType::ALL)
-        {
-            const int pdg{std::abs(pMainMC->GetParticleId())};
-            if ((valType == ValidationType::SHOWER && (pdg != PHOTON && pdg != E_MINUS)) ||
-                (valType == ValidationType::TRACK && (pdg == PHOTON || pdg == E_MINUS)))
-                continue;
-        }
-        hitParentsValid[pCaloHit] = parents;
-
-        // Include all hits in clusters matched to track/shower particles as well as just the true track/shower hits NOTE not using for now
-        // const MCParticle *const pMainMC{parents.m_pMainMC};
-        // const MCParticle *const pClusterMainMC{parents.m_pClusterMainMC};
-        // if (valType != ValidationType::ALL)
-        // {
-        //     const int mainPdg{std::abs(pMainMC->GetParticleId())};
-        //     const bool mainIsShower{mainPdg == PHOTON || mainPdg == E_MINUS};
-        //     // Hit may have no reco cluster causing this to happen
-        //     // NOTE In future metric calculations no reco cluster is being treated as belonging to the null cluster
-        //     if (!pClusterMainMC)
-        //     {
-        //         if ((valType == ValidationType::SHOWER && !mainIsShower) || (valType == ValidationType::TRACK && mainIsShower))
-        //         {
-        //             continue;
-        //         }
-        //     }
-        //     else
-        //     {
-        //         const int clusterMainPdg{std::abs(pClusterMainMC->GetParticleId())};
-        //         const bool clusterMainIsShower{clusterMainPdg == PHOTON || clusterMainPdg == E_MINUS};
-        //         if ((valType == ValidationType::SHOWER && !mainIsShower && !clusterMainIsShower) ||
-        //             (valType == ValidationType::TRACK && mainIsShower && clusterMainIsShower))
-        //         {
-        //             continue;
-        //         }
-        //     }
-        // }
-        // hitParentsValid[pCaloHit] = parents;
+        const Cluster *const pCluster{parents.m_pCluster};
+        const MCParticle *const pMC{parents.m_pMainMC};
+        clusterMainMCNHits[pCluster][pMC]++;
     }
 
-    return hitParentsValid;
+    std::map<const Cluster *const, const MCParticle *const> clusterMainMCs;
+    for (const auto &[pCluster, mainMCNHits] : clusterMainMCNHits)
+    {
+        const MCParticle *pClusterMainMC{nullptr};
+        int maxHits{0};
+        for (const auto &[pMC, nHits] : mainMCNHits)
+        {
+            if (nHits > maxHits)
+            {
+                pClusterMainMC = pMC;
+                maxHits = nHits;
+            }
+            else if (nHits == maxHits) // tie-breaker
+            {
+                if (LArMCParticleHelper::SortByMomentum(pMC, pClusterMainMC))
+                {
+                    pClusterMainMC = pMC;
+                }
+            }
+        }
+        clusterMainMCs.insert({pCluster, pClusterMainMC});
+    }
+
+    for (auto &[pCaloHit, parents] : hitParents)
+    {
+        parents.m_pClusterMainMC = clusterMainMCs.at(parents.m_pCluster);
+    }
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+int EventClusterValidationAlgorithm::HandleNullClusterHits(std::map<const CaloHit *const, CaloHitParents> &hitParents) const
+{
+    int nNullClusterHits{0};
+    for (auto it = hitParents.begin(); it != hitParents.end();)
+    {
+        if (!it->second.m_pCluster)
+        {
+            if (m_dropNullClusterHits)
+            {
+                it = hitParents.erase(it);
+            }
+            else
+            {
+                it++;
+            }
+            nNullClusterHits++;
+        }
+        else
+        {
+            it++;
+        }
+    }
+
+    return nNullClusterHits;
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -509,105 +496,11 @@ std::map<const CaloHit *const, EventClusterValidationAlgorithm::CaloHitParents> 
 void EventClusterValidationAlgorithm::GetClusterMetrics(
     const std::map<const CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const
 {
-    if (m_onlyRandIndex)
-    {
-        metrics.m_nHits = hitParents.size();
-        return;
-    }
-
-    // Adapted from Andy's code for calculating cluster purity and completeness (ClusterValidationAlgorithm)
-    std::set<const Cluster *> validClusters;
-    std::set<const MCParticle *> validMCParticles;
-    for (const auto &[pCaloHit, parents] : hitParents)
-    {
-        validClusters.insert(parents.m_pCluster);
-        validMCParticles.insert(parents.m_pMainMC);
-    }
-    metrics.m_nHits = hitParents.size();
-    metrics.m_nClusters = validClusters.size();
-    metrics.m_nMainMCs = validMCParticles.size();
-
-    for (const Cluster *const pCluster : validClusters)
-    {
-        CaloHitList clusterCaloHits;
-        if (pCluster)
-        {
-            const CaloHitList &isolatedHits{pCluster->GetIsolatedCaloHitList()};
-            pCluster->GetOrderedCaloHitList().FillCaloHitList(clusterCaloHits);
-            clusterCaloHits.insert(clusterCaloHits.end(), isolatedHits.begin(), isolatedHits.end());
-        }
-        else // The hit has a null cluster ie. it is unclustered, treat all such hits as being clustered together
-        {
-            for (const auto &[pCaloHit, parents] : hitParents)
-            {
-                if (!parents.m_pCluster)
-                    clusterCaloHits.emplace_back(pCaloHit);
-            }
-        }
-
-        std::map<const MCParticle *const, int> mainMCParticleHits;
-        float totalHits{0};
-        for (const CaloHit *const pCaloHit : clusterCaloHits)
-        {
-            if (hitParents.find(pCaloHit) == hitParents.end())
-                continue;
-
-            const MCParticle *const pMC = hitParents.at(pCaloHit).m_pMainMC;
-            if (mainMCParticleHits.find(pMC) == mainMCParticleHits.end())
-                mainMCParticleHits[pMC] = 0;
-            mainMCParticleHits.at(pMC)++;
-            totalHits++;
-        }
-        if (totalHits == 0) // Something went wrong and won't be able to get metrics from this cluster
-            continue;
-
-        // Determine which MC particle contributes the most weight across the cluster
-        const MCParticle *pMainMC{nullptr};
-        int maxHits{0};
-        for (const auto &[pMC, nHits] : mainMCParticleHits)
-        {
-            if (nHits > maxHits)
-            {
-                pMainMC = pMC;
-                maxHits = nHits;
-            }
-            else if (nHits == maxHits) // tie-breaker
-            {
-                if (LArMCParticleHelper::SortByMomentum(pMC, pMainMC))
-                {
-                    pMainMC = pMC;
-                }
-            }
-        }
-        metrics.m_purities.emplace_back(maxHits / totalHits);
-        metrics.m_nRecoHits.emplace_back(totalHits);
-
-        // Calculate cluster completeness
-        int nTotalMainMCHits{0};
-        for (const auto &[pCaloHit, parents] : hitParents)
-        {
-            if (pMainMC == parents.m_pMainMC)
-                nTotalMainMCHits++;
-        }
-        metrics.m_completenesses.emplace_back(maxHits / static_cast<float>(nTotalMainMCHits));
-    }
-}
-
-//------------------------------------------------------------------------------------------------------------------------------------------
-
-void EventClusterValidationAlgorithm::GetClusterMetricsSPINELike(
-    const std::map<const CaloHit *const, CaloHitParents> &hitParents, ClusterMetricsSPINELike &metrics) const
-{
     std::map<const MCParticle *const, std::set<const CaloHit *>> trueClusters;
-    std::map<const MCParticle *const, std::set<const CaloHit *>> recoClusters;
-    int nNull{0};
+    std::map<const Cluster *const, std::set<const CaloHit *>> recoClusters;
+    std::map<const Cluster *const, const MCParticle *const> recoClusterToMainMC;
     for (const auto &[pCaloHit, parents] : hitParents)
     {
-        if (!parents.m_pCluster)
-        {
-            nNull++;
-            continue;
-        }
         if (trueClusters.find(parents.m_pMainMC) == trueClusters.end())
         {
             trueClusters.insert({parents.m_pMainMC, { pCaloHit }});
@@ -616,32 +509,25 @@ void EventClusterValidationAlgorithm::GetClusterMetricsSPINELike(
         {
             trueClusters.at(parents.m_pMainMC).insert(pCaloHit);
         }
-        if (recoClusters.find(parents.m_pClusterMainMC) == recoClusters.end())
+        if (recoClusters.find(parents.m_pCluster) == recoClusters.end())
         {
-            recoClusters.insert({parents.m_pClusterMainMC, { pCaloHit }});
+            recoClusters.insert({parents.m_pCluster, { pCaloHit }});
+            recoClusterToMainMC.insert({parents.m_pCluster, parents.m_pClusterMainMC});
         }
         else
         {
-            recoClusters.at(parents.m_pClusterMainMC).insert(pCaloHit);
-        }
-        if (parents.m_pCluster && !parents.m_pClusterMainMC)
-        {
-            std::cout << "!!!!\n";
-        }
-        if (parents.m_pCluster && !parents.m_pMainMC)
-        {
-            std::cout << "????\n";
+            recoClusters.at(parents.m_pCluster).insert(pCaloHit);
         }
     }
-    std::cout << "-- " << nNull << " / " << hitParents.size() << "\n";
 
     // Completeness
     int nHitsTrueAll{0}, nHitsTrueShower{0}, nHitsTrueTrack{0};
-    int completenessSumAll{0}, completenessSumShower{0}, completenessSumTrack{0};
+    double completenessSumAll{0.}, completenessSumShower{0.}, completenessSumTrack{0.};
+    int nTrueClustersShower{0}, nTrueClustersTrack{0};
     for (const auto &[pMC, hits] : trueClusters)
     {
         int maxIntersectionCard{0};
-        for (const auto &[pMCInner, hitsInner] : recoClusters)
+        for (const auto &[pCluster, hitsInner] : recoClusters)
         {
             std::set<const CaloHit *> intersection;
             std::set_intersection(
@@ -654,26 +540,34 @@ void EventClusterValidationAlgorithm::GetClusterMetricsSPINELike(
         }
 
         nHitsTrueAll += hits.size();
-        completenessSumAll += maxIntersectionCard;
+        double summand{static_cast<double>(maxIntersectionCard)};
+        if (!m_hitWeightedPurityCompleteness) {
+            summand /= static_cast<double>(hits.size());
+        }
+        completenessSumAll += summand;
 
-        const int pdg{std::abs(pMC->GetParticleId())};
-        if ((pdg == E_MINUS || pdg == PHOTON) && this->CausesShower(pMC, 0))
+        if (this->IsEM(pMC))
         {
             nHitsTrueShower += hits.size();
-            completenessSumShower += maxIntersectionCard;
+            nTrueClustersShower++;
+            completenessSumShower += summand;
         }
         else
         {
             nHitsTrueTrack += hits.size();
-            completenessSumTrack += maxIntersectionCard;
+            nTrueClustersTrack++;
+            completenessSumTrack += summand;
         }
     }
-    std::cout << nHitsTrueAll << ", " << nHitsTrueTrack << ", " << nHitsTrueShower << "\n";
 
+    // Purity
     int nHitsMatchedAll{0}, nHitsMatchedShower{0}, nHitsMatchedTrack{0};
     int puritySumAll{0}, puritySumShower{0}, puritySumTrack{0};
-    for (const auto &[pMC, hits] : recoClusters)
+    int nRecoClustersShower{0}, nRecoClustersTrack{0};
+    for (const auto &[pCluster, hits] : recoClusters)
     {
+        const MCParticle *const pMC{recoClusterToMainMC.at(pCluster)};
+
         int maxIntersectionCard{0};
         for (const auto &[pMCInner, hitsInner] : trueClusters)
         {
@@ -688,32 +582,42 @@ void EventClusterValidationAlgorithm::GetClusterMetricsSPINELike(
         }
 
         nHitsMatchedAll += hits.size();
-        puritySumAll += maxIntersectionCard;
+        double summand{static_cast<double>(maxIntersectionCard)};
+        if (!m_hitWeightedPurityCompleteness) {
+            summand /= static_cast<double>(hits.size());
+        }
+        puritySumAll += summand;
 
-        const int pdg{std::abs(pMC->GetParticleId())};
-        if ((pdg == E_MINUS || pdg == PHOTON) && this->CausesShower(pMC, 0))
+        if (this->IsEM(pMC))
         {
             nHitsMatchedShower += hits.size();
-            puritySumShower += maxIntersectionCard;
+            nRecoClustersShower++;
+            puritySumShower += summand;
         }
         else
         {
             nHitsMatchedTrack += hits.size();
-            puritySumTrack += maxIntersectionCard;
+            nRecoClustersTrack++;
+            puritySumTrack += summand;
         }
     }
-    
-    metrics.m_completeness = nHitsTrueAll > 0 ? static_cast<double>(completenessSumAll) / static_cast<double>(nHitsTrueAll) : -1.;
-    metrics.m_showerCompleteness = nHitsTrueShower > 0 ? static_cast<double>(completenessSumShower) / static_cast<double>(nHitsTrueShower) : -1.;
-    metrics.m_trackCompleteness = nHitsTrueTrack > 0 ? static_cast<double>(completenessSumTrack) / static_cast<double>(nHitsTrueTrack) : -1.;
-    metrics.m_purity = nHitsMatchedAll > 0 ? static_cast<double>(puritySumAll) / static_cast<double>(nHitsMatchedAll) : -1.;
-    metrics.m_showerPurity = nHitsMatchedShower > 0 ? static_cast<double>(puritySumShower) / static_cast<double>(nHitsMatchedShower) : -1.;
-    metrics.m_trackPurity = nHitsMatchedTrack > 0 ? static_cast<double>(puritySumTrack) / static_cast<double>(nHitsMatchedTrack) : -1.;
-    std::cout << "---- completeness: all - " << metrics.m_completeness << ",  shower - " << metrics.m_showerCompleteness << ",  track - " << metrics.m_trackCompleteness << "\n";
-    std::cout << "---- purity: all - " << metrics.m_purity << ",  shower - " << metrics.m_showerPurity << ",  track - " << metrics.m_trackPurity << "\n";
 
-    // TODO
-    // - Add N true + predicted (all/track/shower) to metrics
+    auto computeMetric = [&](const double sum, const int nHits, const int nClusters) {
+        int denom = m_hitWeightedPurityCompleteness ? nHits : nClusters;
+        return denom > 0 ? sum / static_cast<double>(denom) : -1.;
+    };
+    metrics.m_completeness = computeMetric(completenessSumAll, nHitsTrueAll, trueClusters.size());
+    metrics.m_showerCompleteness = computeMetric(completenessSumShower, nHitsTrueShower, nTrueClustersShower);
+    metrics.m_trackCompleteness = computeMetric(completenessSumTrack, nHitsTrueTrack, nTrueClustersTrack);
+    metrics.m_purity = computeMetric(puritySumAll, nHitsMatchedAll, recoClusters.size());
+    metrics.m_showerPurity = computeMetric(puritySumShower, nHitsMatchedShower, nRecoClustersShower);
+    metrics.m_trackPurity = computeMetric(puritySumTrack, nHitsMatchedTrack, nRecoClustersTrack);
+
+    metrics.m_nShowerTrueHits = nHitsTrueShower;
+    metrics.m_nTrackTrueHits = nHitsTrueTrack;
+    metrics.m_nRecoClusters = recoClusters.size();
+    metrics.m_nShowerRecoClusters = nRecoClustersShower;
+    metrics.m_nTrackRecoClusters = nRecoClustersTrack;
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -737,16 +641,17 @@ void EventClusterValidationAlgorithm::GetMatchedParticleMetrics(
         mcNTrueHits.at(parents.m_pMainMC)++;
     }
 
+    std::map<const Cluster *const, CaloHitList> clusterHits;
+    for (const auto &[pCaloHit, parents] : hitParents)
+    {
+        clusterHits[parents.m_pCluster].emplace_back(pCaloHit);
+    }
+
     ClusterList seenClusters;
     for (const auto &[pCaloHit, parents] : hitParents)
     {
         const Cluster *const pCluster{parents.m_pCluster};
         const MCParticle *const pMatchedMC{parents.m_pClusterMainMC};
-
-        if (!pCluster) // Hit has no reco cluster, I think this happens when clustering done in 3D cannot be related back to 2D
-        {
-            continue;
-        }
 
         if (std::find(seenClusters.begin(), seenClusters.end(), pCluster) != seenClusters.end())
         {
@@ -754,10 +659,7 @@ void EventClusterValidationAlgorithm::GetMatchedParticleMetrics(
         }
         seenClusters.emplace_back(pCluster);
 
-        const CaloHitList &isolatedHits{pCluster->GetIsolatedCaloHitList()};
-        CaloHitList clusterCaloHits;
-        pCluster->GetOrderedCaloHitList().FillCaloHitList(clusterCaloHits);
-        clusterCaloHits.insert(clusterCaloHits.end(), isolatedHits.begin(), isolatedHits.end());
+        CaloHitList clusterCaloHits{clusterHits.at(pCluster)};
         int nTotalHits{static_cast<int>(clusterCaloHits.size())}, nCorrectHits{0};
         for (const CaloHit *const pClusterCaloHit : clusterCaloHits)
         {
@@ -795,25 +697,20 @@ void EventClusterValidationAlgorithm::GetMatchedParticleMetrics(
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-double EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *const, CaloHitParents> &hitParents) const
+void EventClusterValidationAlgorithm::CalcRandIndex(
+    std::map<const CaloHit *const, CaloHitParents> &hitParents, ClusterMetrics &metrics) const
 {
-    // Fill contingency table
-    ContingencyTable<const Cluster *const, const MCParticle *const> cTable;
-
     // Do a perfect shower growing of the reco clusters
     std::map<const CaloHit *const, const Cluster *const> hitMergeTarget;
-    int nShowerClusterMainMCs{0};
     if (m_mergeShowerClustersForRandIndex)
     {
         std::map<const MCParticle *const, const Cluster *const> mcMergeTarget;
         for (const auto &[pCaloHit, parents] : hitParents)
         {
-            const int pdg{std::abs(parents.m_pClusterMainMC->GetParticleId())};
-            if (pdg != PHOTON && pdg != E_MINUS)
+            if (!this->IsEM(parents.m_pClusterMainMC))
             {
                 continue;
             }
-            nShowerClusterMainMCs++;
             // The first cluster we come across will used as the target for the merging within the shower
             if (mcMergeTarget.find(parents.m_pClusterMainMC) == mcMergeTarget.end())
             {
@@ -822,15 +719,14 @@ double EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *co
             hitMergeTarget.insert({pCaloHit, mcMergeTarget.at(parents.m_pClusterMainMC)});
         }
     }
-    int nShowerMainMCs{0};
-    for (const auto &[pCaloHit, parents] : hitParents)
-    {
-        const int pdg{std::abs(parents.m_pMainMC->GetParticleId())};
-        if (pdg == PHOTON || pdg == E_MINUS)
-        {
-            nShowerMainMCs++;
-        }
-    }
+
+    // Fill contingency table(s)
+    ContingencyTable<const Cluster *const, const MCParticle *const> cTable;
+    ContingencyTable<const Cluster *const, const MCParticle *const> cTableShower;
+    ContingencyTable<const Cluster *const, const MCParticle *const> cTableTrack;
+
+    std::set<const Cluster *> recoClusters, trackRecoClusters, showerRecoClusters;
+    std::set<const MCParticle *> trueClusters, trackTrueClusters, showerTrueClusters;
 
     for (const auto &[pCaloHit, parents] : hitParents)
     {
@@ -842,9 +738,27 @@ double EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *co
             pCluster = hitMergeTarget.at(pCaloHit);
         }
 
-        if (cTable.find(pCluster) == cTable.end() || cTable.at(pCluster).find(pMC) == cTable.at(pCluster).end())
-            cTable[pCluster][pMC] = 0;
-        cTable.at(pCluster).at(pMC)++;
+        recoClusters.insert(pCluster);
+        trueClusters.insert(pMC);
+        cTable[pCluster][pMC]++;
+
+        if (m_onlyRandIndex)
+        {
+            continue;
+        }
+
+        if (this->IsEM(pMC))
+        {
+            showerRecoClusters.insert(pCluster);
+            showerTrueClusters.insert(pMC);
+            cTableShower[pCluster][pMC]++;
+        }
+        else
+        {
+            trackRecoClusters.insert(pCluster);
+            trackTrueClusters.insert(pMC);
+            cTableTrack[pCluster][pMC]++;
+        }
     }
 
     if (m_visualize && m_mergeShowerClustersForRandIndex) // This is only worth seeing if the cheated merging has occurred
@@ -853,47 +767,65 @@ double EventClusterValidationAlgorithm::CalcRandIndex(std::map<const CaloHit *co
         this->VisualizeRandIndexRecoClusters(hitParents, hitMergeTarget);
     }
 
-    return LArMonitoringHelper::CalcRandIndex(cTable);
+    metrics.m_ari = LArMonitoringHelper::CalcRandIndex(cTable);
+    metrics.m_nAriRecoClusters = static_cast<int>(recoClusters.size());
+    metrics.m_nTrueClusters = static_cast<int>(trueClusters.size());
+    if (m_onlyRandIndex)
+    {
+        return;
+    }
+    metrics.m_showerAri = LArMonitoringHelper::CalcRandIndex(cTableShower);
+    metrics.m_nShowerAriRecoClusters = static_cast<int>(showerRecoClusters.size());
+    metrics.m_nShowerTrueClusters = static_cast<int>(showerTrueClusters.size());
+    metrics.m_trackAri = LArMonitoringHelper::CalcRandIndex(cTableTrack);
+    metrics.m_nTrackAriRecoClusters = static_cast<int>(trackRecoClusters.size());
+    metrics.m_nTrackTrueClusters = static_cast<int>(trackTrueClusters.size());
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
 void EventClusterValidationAlgorithm::SetBranches(
-    [[maybe_unused]] const ClusterMetrics &clusterMetrics,
-    [[maybe_unused]] const MatchedParticleMetrics &matchedParticleMetrics,
-    [[maybe_unused]] const double randIndex,
-    [[maybe_unused]] const int view,
-    [[maybe_unused]] const ValidationType valType) const
+    const ClusterMetrics &clusterMetrics, const MatchedParticleMetrics &matchedParticleMetrics, const int view) const
 {
-    std::string branchPrefix;
-    if (valType == ValidationType::ALL)
-        branchPrefix = "all_";
-    else if (valType == ValidationType::SHOWER)
-        branchPrefix = "shower_";
-    else if (valType == ValidationType::TRACK)
-        branchPrefix = "track_";
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "event", m_eventNumber - 1));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "view", view));
 
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "adjusted_rand_idx", randIndex));
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "n_hits", clusterMetrics.m_nHits));
-    if (m_onlyRandIndex) { return; }
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "n_clusters", clusterMetrics.m_nClusters));
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "n_mainMCs", clusterMetrics.m_nMainMCs));
-#ifdef MONITORING
-    double meanPurity{-1.0}, meanCompleteness{-1.0}, meanNRecoHits{-1.0};
-    if (!clusterMetrics.m_purities.empty() && !clusterMetrics.m_completenesses.empty() && !clusterMetrics.m_nRecoHits.empty())
+    // Just the all-hits ARI with some values that might be needed for cuts
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "n_hits", clusterMetrics.m_nHits));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "n_hits_null", clusterMetrics.m_nHitsNullCluster));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "adjusted_rand_idx", clusterMetrics.m_ari));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "n_true_clusters", clusterMetrics.m_nTrueClusters));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "n_ari_reco_clusters", clusterMetrics.m_nAriRecoClusters));
+
+    if (m_onlyRandIndex)
     {
-        meanPurity = std::accumulate(
-            clusterMetrics.m_purities.begin(), clusterMetrics.m_purities.end(), 0.0) / clusterMetrics.m_purities.size();
-        meanCompleteness = std::accumulate(
-            clusterMetrics.m_completenesses.begin(), clusterMetrics.m_completenesses.end(), 0.0) / clusterMetrics.m_completenesses.size();
-        meanNRecoHits = std::accumulate(
-            clusterMetrics.m_nRecoHits.begin(), clusterMetrics.m_nRecoHits.end(), 0.0) / clusterMetrics.m_nRecoHits.size();
+        PANDORA_MONITORING_API(FillTree(this->GetPandora(), m_treeName));
+        return;
     }
-#endif
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "mean_purity", meanPurity));
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "mean_completeness", meanCompleteness));
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, branchPrefix + "mean_n_reco_hits", meanNRecoHits));
-    if (m_matchedParticleMetrics && valType == ValidationType::ALL)
+    
+    // The shower/track ARI with values needed for cuts
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "shower_adjusted_rand_idx", clusterMetrics.m_showerAri));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "shower_n_true_clusters", clusterMetrics.m_nShowerTrueClusters));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "shower_n_ari_reco_clusters", clusterMetrics.m_nShowerAriRecoClusters));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "track_adjusted_rand_idx", clusterMetrics.m_trackAri));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "track_n_true_clusters", clusterMetrics.m_nTrackTrueClusters));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "track_n_ari_reco_clusters", clusterMetrics.m_nTrackAriRecoClusters));
+
+    // The cluster purity/completenesses with values needed for cuts (already have the number of true clusters from ARI branches)
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "purity", clusterMetrics.m_purity));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "completeness", clusterMetrics.m_completeness));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "n_reco_clusters", clusterMetrics.m_nRecoClusters));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "shower_purity", clusterMetrics.m_showerPurity));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "shower_completeness", clusterMetrics.m_showerCompleteness));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "shower_n_reco_clusters", clusterMetrics.m_nShowerRecoClusters));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "track_purity", clusterMetrics.m_trackPurity));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "track_completeness", clusterMetrics.m_trackCompleteness));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "track_n_reco_clusters", clusterMetrics.m_nTrackRecoClusters));
+
+    PANDORA_MONITORING_API(FillTree(this->GetPandora(), m_treeName));
+
+    // Matched particle metrics
+    if (m_matchedParticleMetrics)
     {
         for (int i = 0; i < static_cast<int>(matchedParticleMetrics.m_pdg.size()); i++)
         {
@@ -999,7 +931,10 @@ StatusCode EventClusterValidationAlgorithm::ReadSettings(const TiXmlHandle xmlHa
     std::vector<std::string> caloHitListNames;
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "CaloHitListNames", caloHitListNames));
-    if (!caloHitListNames.empty()) { m_caloHitListNames = caloHitListNames; }
+    if (!caloHitListNames.empty())
+    {
+        m_caloHitListNames = caloHitListNames;
+    }
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "ClusterListNames", m_clusterListNames));
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
@@ -1017,11 +952,10 @@ StatusCode EventClusterValidationAlgorithm::ReadSettings(const TiXmlHandle xmlHa
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "MatchedParticleMetrics", m_matchedParticleMetrics));
     PANDORA_RETURN_RESULT_IF_AND_IF(
-        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
-        XmlHelper::ReadValue(xmlHandle, "TrackShowerOnlyMetrics", m_trackShowerOnlyMetrics));
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "DropNullClusterHits", m_dropNullClusterHits));
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
-        XmlHelper::ReadValue(xmlHandle, "ClusterMetricsSPINELike", m_clusterMetricsSPINELike));
+        XmlHelper::ReadValue(xmlHandle, "HitWeightedPurityCompleteness", m_hitWeightedPurityCompleteness));
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "Visualize", m_visualize));
