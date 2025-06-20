@@ -2,8 +2,6 @@
  *  @file   larpandoracontent/LArMonitoring/EventClusterValidationAlgorithm.cc
  *
  *  @brief  Implementation of the event-level cluster validation.
- *
- *  $Log: $
  */
 
 #include "Pandora/AlgorithmHeaders.h"
@@ -159,10 +157,7 @@ StatusCode EventClusterValidationAlgorithm::Run()
         clusterMetrics.m_nHits = hitParents.size();
 
         // Drop any hits with a main MC particle with insufficient activity
-        if (m_minMCHitsPerView > 0)
-        {
-            this->ApplyMCParticleMinSumHits(hitParents);
-        }
+        this->ApplyMCParticleMinSumHits(hitParents);
 
         clusterMetrics.m_nHitsNullCluster = this->HandleNullClusterHits(hitParents);
 
@@ -198,7 +193,7 @@ StatusCode EventClusterValidationAlgorithm::Run()
 //------------------------------------------------------------------------------------------------------------------------------------------
 
 void EventClusterValidationAlgorithm::GetHitParents(
-    const CaloHitList &caloHits, const ClusterList &clusters, std::map<const CaloHit *const, CaloHitParents> &hitParents) const
+        const CaloHitList &caloHits, const ClusterList &clusters, std::map<const CaloHit *const, CaloHitParents> &hitParents) const
 {
     std::map<const MCParticle *const, const MCParticle *const> mcFoldTo;
     for (const CaloHit *const pCaloHit : caloHits)
@@ -213,7 +208,7 @@ void EventClusterValidationAlgorithm::GetHitParents(
                 const MCParticle *pFoldedMC{nullptr};
                 if (mcFoldTo.find(pMC) != mcFoldTo.end())
                 {
-                     pFoldedMC = mcFoldTo.at(pMC);
+                    pFoldedMC = mcFoldTo.at(pMC);
                 }
                 else
                 {
@@ -320,7 +315,7 @@ const MCParticle* EventClusterValidationAlgorithm::FoldMCTo(const MCParticle *co
     }
 }
 
-//-------------------------------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------------------------------
 
 bool EventClusterValidationAlgorithm::CausesShower(const MCParticle *const pMC, int nDescendentElectrons) const
 {
@@ -344,7 +339,7 @@ bool EventClusterValidationAlgorithm::CausesShower(const MCParticle *const pMC, 
     return false;
 }
 
-//-------------------------------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------------------------------
 
 inline bool EventClusterValidationAlgorithm::IsEM(const pandora::MCParticle *const pMC) const
 {
@@ -352,7 +347,7 @@ inline bool EventClusterValidationAlgorithm::IsEM(const pandora::MCParticle *con
     return (pdg == E_MINUS || pdg == PHOTON);
 }
 
-//-------------------------------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------------------------------
 
 const MCParticle* EventClusterValidationAlgorithm::FoldPotentialDeltaRayTo(const CaloHit *const pCaloHit, const MCParticle *const pMC) const
 {
@@ -398,15 +393,15 @@ const MCParticle* EventClusterValidationAlgorithm::FoldPotentialDeltaRayTo(const
 
 void EventClusterValidationAlgorithm::ApplyMCParticleMinSumHits(std::map<const CaloHit *const, CaloHitParents> &hitParents) const
 {
+    if (m_minMCHitsPerView == 0)
+    {
+        return;
+    }
+
     std::map<const MCParticle *const, int> mcSumHits;
     for (const auto &[pCaloHit, parents] : hitParents)
     {
-        const MCParticle *const pMainMC{parents.m_pMainMC};
-        if (mcSumHits.find(pMainMC) == mcSumHits.end())
-        {
-            mcSumHits[pMainMC] = 0;
-        }
-        mcSumHits.at(pMainMC)++;
+        mcSumHits[parents.m_pMainMC]++;
     }
 
     for (auto it = hitParents.begin(); it != hitParents.end();)
@@ -539,7 +534,7 @@ void EventClusterValidationAlgorithm::GetClusterMetrics(
             }
         }
 
-        nHitsTrueAll += hits.size();
+        nHitsTrueAll += static_cast<int>(hits.size());
         double summand{static_cast<double>(maxIntersectionCard)};
         if (!m_hitWeightedPurityCompleteness) {
             summand /= static_cast<double>(hits.size());
@@ -548,13 +543,13 @@ void EventClusterValidationAlgorithm::GetClusterMetrics(
 
         if (this->IsEM(pMC))
         {
-            nHitsTrueShower += hits.size();
+            nHitsTrueShower += static_cast<int>(hits.size());
             nTrueClustersShower++;
             completenessSumShower += summand;
         }
         else
         {
-            nHitsTrueTrack += hits.size();
+            nHitsTrueTrack += static_cast<int>(hits.size());
             nTrueClustersTrack++;
             completenessSumTrack += summand;
         }
@@ -562,7 +557,7 @@ void EventClusterValidationAlgorithm::GetClusterMetrics(
 
     // Purity
     int nHitsMatchedAll{0}, nHitsMatchedShower{0}, nHitsMatchedTrack{0};
-    int puritySumAll{0}, puritySumShower{0}, puritySumTrack{0};
+    double puritySumAll{0.}, puritySumShower{0.}, puritySumTrack{0.};
     int nRecoClustersShower{0}, nRecoClustersTrack{0};
     for (const auto &[pCluster, hits] : recoClusters)
     {
@@ -581,7 +576,7 @@ void EventClusterValidationAlgorithm::GetClusterMetrics(
             }
         }
 
-        nHitsMatchedAll += hits.size();
+        nHitsMatchedAll += static_cast<int>(hits.size());
         double summand{static_cast<double>(maxIntersectionCard)};
         if (!m_hitWeightedPurityCompleteness) {
             summand /= static_cast<double>(hits.size());
@@ -590,20 +585,20 @@ void EventClusterValidationAlgorithm::GetClusterMetrics(
 
         if (this->IsEM(pMC))
         {
-            nHitsMatchedShower += hits.size();
+            nHitsMatchedShower += static_cast<int>(hits.size());
             nRecoClustersShower++;
             puritySumShower += summand;
         }
         else
         {
-            nHitsMatchedTrack += hits.size();
+            nHitsMatchedTrack += static_cast<int>(hits.size());
             nRecoClustersTrack++;
             puritySumTrack += summand;
         }
     }
 
     auto computeMetric = [&](const double sum, const int nHits, const int nClusters) {
-        int denom = m_hitWeightedPurityCompleteness ? nHits : nClusters;
+        int denom{m_hitWeightedPurityCompleteness ? nHits : nClusters};
         return denom > 0 ? sum / static_cast<double>(denom) : -1.;
     };
     metrics.m_completeness = computeMetric(completenessSumAll, nHitsTrueAll, trueClusters.size());
@@ -802,6 +797,9 @@ void EventClusterValidationAlgorithm::SetBranches(
         PANDORA_MONITORING_API(FillTree(this->GetPandora(), m_treeName));
         return;
     }
+
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "shower_n_hits", clusterMetrics.m_nShowerTrueHits));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "track_n_hits", clusterMetrics.m_nTrackTrueHits));
     
     // The shower/track ARI with values needed for cuts
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "shower_adjusted_rand_idx", clusterMetrics.m_showerAri));

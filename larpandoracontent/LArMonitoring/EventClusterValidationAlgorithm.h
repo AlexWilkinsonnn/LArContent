@@ -2,8 +2,7 @@
  *  @file   larpandoracontent/LArMonitoring/EventClusterValidationAlgorithm.h
  *
  *  @brief  Header file of the event-level cluster validation. Calculate metrics that aim to quantify the quality of 2D clusters at
- *          the level of a single view. There are some extra considerations implemented to not penalise clusters that are unobtainable
- *          from 2D clustering algorithms alone (delta rays that overlap with the parent particle in a view and merged showers)
+ *          the level of a single view.
  */
 #ifndef LAR_EVENT_CLUSTER_VALIDATION_ALGORITHM_H
 #define LAR_EVENT_CLUSTER_VALIDATION_ALGORITHM_H 1
@@ -42,7 +41,7 @@ private:
         int m_nTrueClusters;
         int m_nShowerTrueClusters;
         int m_nTrackTrueClusters;
-        int m_nAriRecoClusters; // Number of unique clusters that appear in contingency table (can be different due to no cluster-matching and m_mergeShowerClustersForRandIndex)
+        int m_nAriRecoClusters;
         int m_nShowerAriRecoClusters;
         int m_nTrackAriRecoClusters;
     };
