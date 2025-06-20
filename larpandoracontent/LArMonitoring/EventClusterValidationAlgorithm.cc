@@ -161,6 +161,11 @@ StatusCode EventClusterValidationAlgorithm::Run()
 
         clusterMetrics.m_nHitsNullCluster = this->HandleNullClusterHits(hitParents);
 
+        if (hitParents.empty())
+        {
+            continue;
+        }
+
         this->GetClusterMainMC(hitParents);
 
         if (m_visualize)
