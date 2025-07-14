@@ -11,7 +11,7 @@
 #include "larpandoracontent/LArHelpers/LArClusterHelper.h"
 #include "larpandoracontent/LArHelpers/LArMonitoringHelper.h"
 #include "larpandoracontent/LArHelpers/LArMCParticleHelper.h"
-#include "Helpers/MCParticleHelper.h"
+#include "larpandoracontent/LArHelpers/LArGeometryHelper.h"
 
 #include <numeric>
 #include <algorithm>
@@ -73,8 +73,8 @@ EventClusterValidationAlgorithm::MatchedParticleMetrics::MatchedParticleMetrics(
 
 EventClusterValidationAlgorithm::EventClusterValidationAlgorithm() :
     m_eventNumber{0},
-    m_deltaRayLengthThresholdSquared{pow(4.67f / 2.f, 2.f)}, // ~half a wire pitch
-    m_deltaRayParentWeightThreshold{0.01f},
+    m_deltaRayLengthThresholdSquared{std::map<HitType, float>{}},
+    m_deltaRayParentWeightThreshold{0.f},
     m_caloHitListNames{ { "CaloHitList2D" } },
     m_minMCHitsPerView{0},
     m_onlyRandIndex{false},
@@ -84,7 +84,8 @@ EventClusterValidationAlgorithm::EventClusterValidationAlgorithm() :
     m_visualize{false},
     m_matchedParticleMetrics{false},
     m_dropNullClusterHits{false},
-    m_hitWeightedPurityCompleteness{false}
+    m_hitWeightedPurityCompleteness{false},
+    m_maximalMatching{false}
 {
 }
 
@@ -104,6 +105,7 @@ EventClusterValidationAlgorithm::~EventClusterValidationAlgorithm()
     PANDORA_MONITORING_API(
         SetTreeVariable(
             this->GetPandora(), m_treeName + "_meta", "merge_shower_clusters_for_rand_index", m_mergeShowerClustersForRandIndex ? 1 : 0));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName + "_meta", "maximal_matching", m_maximalMatching ? 1 : 0));
     PANDORA_MONITORING_API(FillTree(this->GetPandora(), m_treeName + "_meta"));
     PANDORA_MONITORING_API(SaveTree(this->GetPandora(), m_treeName + "_meta", m_fileName, "UPDATE"));
 }
@@ -371,12 +373,13 @@ const MCParticle* EventClusterValidationAlgorithm::FoldPotentialDeltaRayTo(const
     }
 
     // Delta ray that does not start a shower and is short -> fold into parent particle
-    if (!this->CausesShower(pMC, 0) && (pMC->GetVertex() - pMC->GetEndpoint()).GetMagnitudeSquared() < m_deltaRayLengthThresholdSquared)
+    if (!this->CausesShower(pMC, 0) &&
+        (pMC->GetVertex() - pMC->GetEndpoint()).GetMagnitudeSquared() < m_deltaRayLengthThresholdSquared.at(pCaloHit->GetHitType()))
     {
         return pParentMC;
     }
 
-    // Now have a delta ray that we would like to cluster but only the hits that not overlapping with the parent particle
+    // Now have a delta ray that we would like to cluster but only the hits that are not overlapping with the parent particle
     float parentWeight{std::numeric_limits<float>::lowest()};
     const MCParticleWeightMap &weightMap{pCaloHit->GetMCParticleWeightMap()};
     for (const auto &[pContributingMC, weight] : weightMap)
@@ -626,9 +629,7 @@ void EventClusterValidationAlgorithm::GetMatchedParticleMetrics(
     const std::map<const CaloHit *const, CaloHitParents> &hitParents, MatchedParticleMetrics &metrics) const
 {
     std::map<const MCParticle *const, const Cluster *> mcMatchedCluster;
-    std::map<const MCParticle *const, int> mcMatchedClusterCorrectHits;
-    std::map<const MCParticle *const, int> mcMatchedClusterTotalHits;
-    std::map<const MCParticle *const, int> mcNTrueHits;
+    std::map<const MCParticle *const, int> mcMatchedClusterCorrectHits, mcMatchedClusterTotalHits, mcNTrueHits;
     for (const auto &[pCaloHit, parents] : hitParents)
     {
         if (mcMatchedCluster.find(parents.m_pMainMC) == mcMatchedCluster.end())
@@ -641,45 +642,105 @@ void EventClusterValidationAlgorithm::GetMatchedParticleMetrics(
         mcNTrueHits.at(parents.m_pMainMC)++;
     }
 
-    std::map<const Cluster *const, CaloHitList> clusterHits;
+    std::map<const Cluster *const, std::map<const MCParticle *const, int>> clusterMCNHits;
+    std::map<const Cluster *const, int> clusterNHits;
     for (const auto &[pCaloHit, parents] : hitParents)
     {
-        clusterHits[parents.m_pCluster].emplace_back(pCaloHit);
+        if (parents.m_pCluster)
+        {
+            clusterMCNHits[parents.m_pCluster][parents.m_pMainMC]++;
+            clusterNHits[parents.m_pCluster]++;
+        }
     }
 
-    ClusterList seenClusters;
-    for (const auto &[pCaloHit, parents] : hitParents)
+    auto isBetterMatch =
+        [&mcMatchedCluster, &mcMatchedClusterCorrectHits, &mcMatchedClusterTotalHits]
+        (const MCParticle *const pMC, const int nCorrectHits, const int nTotalHits, const Cluster *const pCluster)
     {
-        const Cluster *const pCluster{parents.m_pCluster};
-        const MCParticle *const pMatchedMC{parents.m_pClusterMainMC};
+        return
+            !mcMatchedCluster.at(pMC) ||                                                // No competitor
+            nCorrectHits > mcMatchedClusterCorrectHits.at(pMC) ||                       // More matched hits
+            (nCorrectHits == mcMatchedClusterCorrectHits.at(pMC) &&                     // Need to do a tie-breaker
+                (nTotalHits < mcMatchedClusterTotalHits.at(pMC) ||                      // Purity tie-breaker
+                LArClusterHelper::SortByPosition(pCluster, mcMatchedCluster.at(pMC)))); // Arbitrary tie-breaker
+    };
 
-        if (std::find(seenClusters.begin(), seenClusters.end(), pCluster) != seenClusters.end())
+    if (!m_maximalMatching)
+    {
+        ClusterList seenClusters;
+        for (const auto &[pCaloHit, parents] : hitParents)
         {
-            continue;
-        }
-        seenClusters.emplace_back(pCluster);
+            const Cluster *const pCluster{parents.m_pCluster};
+            const MCParticle *const pMatchedMC{parents.m_pClusterMainMC};
 
-        CaloHitList clusterCaloHits{clusterHits.at(pCluster)};
-        int nTotalHits{static_cast<int>(clusterCaloHits.size())}, nCorrectHits{0};
-        for (const CaloHit *const pClusterCaloHit : clusterCaloHits)
-        {
-            if (hitParents.find(pClusterCaloHit) != hitParents.end() && hitParents.at(pClusterCaloHit).m_pMainMC == pMatchedMC)
+            if (!pCluster)
             {
-                nCorrectHits++;
+                continue; // Not letting the null cluster be matched
+            }
+
+            if (std::find(seenClusters.begin(), seenClusters.end(), pCluster) != seenClusters.end())
+            {
+                continue;
+            }
+            seenClusters.emplace_back(pCluster);
+
+            int nTotalHits{clusterNHits.at(pCluster)};
+            int nCorrectHits{clusterMCNHits.at(pCluster).at(pMatchedMC)};
+
+            if (isBetterMatch(pMatchedMC, nCorrectHits, nTotalHits, pCluster))
+            {
+                mcMatchedCluster.at(pMatchedMC) = pCluster;
+                mcMatchedClusterCorrectHits.at(pMatchedMC) = nCorrectHits;
+                mcMatchedClusterTotalHits.at(pMatchedMC) = nTotalHits;
             }
         }
-
-        if (
-            !mcMatchedCluster.at(pMatchedMC) || // No competitor
-            nCorrectHits > mcMatchedClusterCorrectHits.at(pMatchedMC) || // More matched hits
-            (nCorrectHits == mcMatchedClusterCorrectHits.at(pMatchedMC) && // Need to do a tie-breaker
-                (nTotalHits < mcMatchedClusterTotalHits.at(pMatchedMC) || // Purity tie-breaker
-                 LArClusterHelper::SortByPosition(pCluster, mcMatchedCluster.at(pMatchedMC))) // Arbitrary tie-breaker
-            ))
+    }
+    else
+    {
+        std::map<const Cluster *const, MCParticleList> clusterOrderedMCs;
+        for (auto it = clusterMCNHits.begin(); it != clusterMCNHits.end(); it++)
         {
-            mcMatchedCluster.at(pMatchedMC) = pCluster;
-            mcMatchedClusterCorrectHits.at(pMatchedMC) = nCorrectHits;
-            mcMatchedClusterTotalHits.at(pMatchedMC) = nTotalHits;
+            const Cluster *const pCluster = it->first;
+            const std::map<const MCParticle *const, int> &mcNHits = it->second;
+            MCParticleList orderedMCs;
+            for (const auto &[pMC, nHits] : mcNHits)
+            {
+                orderedMCs.emplace_back(pMC);
+            }
+            orderedMCs.sort([&mcNHits](const MCParticle *const pA, const MCParticle *const pB) { return mcNHits.at(pA) > mcNHits.at(pB); });
+            clusterOrderedMCs.insert({pCluster, orderedMCs});
+        }
+
+        std::set<const Cluster *> matchedClusters;
+        bool newMatch{true};
+        while (newMatch)
+        {
+            newMatch = false;
+            for (auto it = clusterOrderedMCs.begin(); it != clusterOrderedMCs.end(); )
+            {
+                const Cluster *const pCluster{it->first};
+                // Exhausted this cluster's MC contributions, or the cluster was already matched in the previous loop
+                if (it->second.empty() || matchedClusters.find(pCluster) != matchedClusters.end())
+                {
+                    it = clusterOrderedMCs.erase(it);
+                    continue;
+                }
+                const MCParticle *const pMC{it->second.front()}; it->second.pop_front();
+                const int nCorrectHits{clusterMCNHits.at(pCluster).at(pMC)};
+                const int nTotalHits{clusterNHits.at(pCluster)};
+
+                if (isBetterMatch(pMC, nCorrectHits, nTotalHits, pCluster))
+                {
+                    newMatch = true;
+                    matchedClusters.erase(mcMatchedCluster.at(pMC));
+                    matchedClusters.insert(pCluster);
+                    mcMatchedCluster.at(pMC) = pCluster;
+                    mcMatchedClusterCorrectHits.at(pMC) = nCorrectHits;
+                    mcMatchedClusterTotalHits.at(pMC) = nTotalHits;
+                }
+
+                it++;
+            }
         }
     }
 
@@ -785,7 +846,9 @@ void EventClusterValidationAlgorithm::CalcRandIndex(
 //------------------------------------------------------------------------------------------------------------------------------------------
 
 void EventClusterValidationAlgorithm::SetBranches(
-    const ClusterMetrics &clusterMetrics, const MatchedParticleMetrics &matchedParticleMetrics, const int view) const
+    [[maybe_unused]] const ClusterMetrics &clusterMetrics,
+    [[maybe_unused]] const MatchedParticleMetrics &matchedParticleMetrics,
+    [[maybe_unused]] const int view) const
 {
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "event", m_eventNumber - 1));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName, "view", view));
@@ -866,7 +929,7 @@ void EventClusterValidationAlgorithm::VisualizeTargetClusters(std::map<const Cal
     }
 
     int color {1}; // 0 is white
-    for (const auto &[pMC, caloHits] : mcToCaloHits)
+    for ([[maybe_unused]] const auto &[pMC, caloHits] : mcToCaloHits)
     {
         PANDORA_MONITORING_API(
             VisualizeCaloHits(this->GetPandora(),
@@ -909,7 +972,7 @@ void EventClusterValidationAlgorithm::VisualizeRandIndexRecoClusters(
     int color {1}; // 0 is white
     for (const auto &[pCluster, caloHits] : clusterToCaloHits)
     {
-        const MCParticle *const pMC{clusterToMainMC.at(pCluster)};
+        [[maybe_unused]] const MCParticle *const pMC{clusterToMainMC.at(pCluster)};
         PANDORA_MONITORING_API(
             VisualizeCaloHits(
                 this->GetPandora(),
@@ -948,6 +1011,14 @@ StatusCode EventClusterValidationAlgorithm::ReadSettings(const TiXmlHandle xmlHa
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "FoldShowers", m_foldShowers));
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "HandleDeltaRays", m_handleDeltaRays));
+    if (m_handleDeltaRays)
+    {
+        m_deltaRayLengthThresholdSquared = {
+            { TPC_VIEW_U, static_cast<float>(pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_U), 2.)) },
+            { TPC_VIEW_V, static_cast<float>(pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_V), 2.)) },
+            { TPC_VIEW_W, static_cast<float>(pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_W), 2.)) }
+        };
+    }
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "MergeShowerClustersForRandIndex", m_mergeShowerClustersForRandIndex));
@@ -959,9 +1030,16 @@ StatusCode EventClusterValidationAlgorithm::ReadSettings(const TiXmlHandle xmlHa
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "HitWeightedPurityCompleteness", m_hitWeightedPurityCompleteness));
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "MaximalMatching", m_maximalMatching));
+    if (m_maximalMatching && !m_matchedParticleMetrics)
+    {
+        return STATUS_CODE_INVALID_PARAMETER;
+    }
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "Visualize", m_visualize));
+
 
     return STATUS_CODE_SUCCESS;
 }

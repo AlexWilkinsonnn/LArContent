@@ -107,7 +107,7 @@ private:
         const std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents, MatchedParticleMetrics &metrics) const;
 
     /**
-     *  @brief Calculate Rand Index for the reoc clusters with the true clusters for all/track/shower hits.
+     *  @brief Calculate Rand Index for the reco clusters with the true clusters for all/track/shower hits.
      *         According to m_mergeShowerClustersForRandIndex, the shower clusters may be merged using cheating prior to the calculation.
      *         (Ref. for Adjusted Rand Index: https://link.springer.com/article/10.1007/BF01908075).
      *
@@ -121,7 +121,7 @@ private:
      *
      *  @param[in]  caloHits   List of hits
      *  @param[in]  clusters   List of clusters
-     *  @param[out] hitParents Map of hits to the Ccuster/MC particle they belong to
+     *  @param[out] hitParents Map of hits to the Cluster/MC particle they belong to
      */
     void GetHitParents(const pandora::CaloHitList &caloHits, const pandora::ClusterList &clusters,
         std::map<const pandora::CaloHit *const, CaloHitParents> &hitParents) const;
@@ -182,7 +182,7 @@ private:
 
     /**
      *  @brief Draw the reco clusters used in the Rand Index calculation. These will be different from the clusters inputted to the
-     *         the algorithm if MergeShowerClustersForRandIndex is true.
+     *         algorithm if MergeShowerClustersForRandIndex is true.
      *
      *  @param[in] hitParents Map of hits to the cluster/MC particle they belong to
      *  @param[in] hitParents Map of hits to the cluster they merge with for the Rand Index Calculation.
@@ -210,14 +210,14 @@ private:
      *  @brief Update the branches of the TTree for this entry
      *
      *  @param[in] clusterMetrics         Output metrics for clusters in the view
-     *  @param[in] matchedParticleMetrics Ouptut metrics each particle matched to a cluster in the view
+     *  @param[in] matchedParticleMetrics Output metrics each particle matched to a cluster in the view
      *  @param[in] view                   The view
      */
     void SetBranches(const ClusterMetrics &clusterMetrics, const MatchedParticleMetrics &matchedParticleMetrics, const int view) const;
 
     // members
     int m_eventNumber;                      ///< To track the current event number
-    float m_deltaRayLengthThresholdSquared; ///< Threshold for defining small delta rays that will be folded to the parent particle
+    std::map<pandora::HitType, float> m_deltaRayLengthThresholdSquared; ///< Threshold for defining small delta rays that will be folded to the parent particle
     float m_deltaRayParentWeightThreshold;  ///< Threshold for weight contribution of parent particle for it take the delta ray's hit
 
     // members that may be set from xml
@@ -225,15 +225,16 @@ private:
     std::string m_treeName;                      ///< The name of the ROOT tree
     std::vector<std::string> m_caloHitListNames; ///< The names of the hit lists containing all 2D hits
     std::vector<std::string> m_clusterListNames; ///< The names of the lists of 2D clusters to process
-    int m_minMCHitsPerView;                      ///< Threshold on total main MCParticle hits in each view for consideration in metric calculations
+    int m_minMCHitsPerView;                      ///< Threshold on total main MC particle hits in each view for consideration in metric calculations
     bool m_onlyRandIndex;                        ///< Flag to only calculate the adjusted rand index over all particles
-    bool m_foldShowers;                          ///< Flag to fold shower MC particles to their leading shower MCParticle
+    bool m_foldShowers;                          ///< Flag to fold shower MC particles to their leading shower MC particle
     bool m_handleDeltaRays;                      ///< Flag to fold short delta rays + ignore contributions from daughter electrons that overlap with their parent
     bool m_mergeShowerClustersForRandIndex;      ///< Flag to merge shower-matched clusters into leading shower MC particle for rand index calculation, note this is only makes any sense for showers folded in the simulation or with m_foldShowers
     bool m_visualize;                            ///< Flag to display the target clustering derived from MC particles
     bool m_matchedParticleMetrics;               ///< Flag to calculate a set of high level clustering metrics by truth-matching clusters
     bool m_dropNullClusterHits;                  ///< Flag to ignore any hits associated with the null cluster
     bool m_hitWeightedPurityCompleteness;        ///< Flag for cluster purity and completeness to be averaged over hits rather than clusters
+    bool m_maximalMatching;                      ///< Flag for cluster truth-matching to try matching every MC particle to a cluster, rather than requiring clusters to a hit majority from the matched MC particle
 };
 
 
