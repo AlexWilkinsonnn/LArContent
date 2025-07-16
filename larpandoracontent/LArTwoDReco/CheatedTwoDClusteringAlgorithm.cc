@@ -90,11 +90,12 @@ StatusCode CheatedTwoDClusteringAlgorithm::Run()
             const MCParticle *pMainParentMC{nullptr};
             if (m_ignoreOverlappingDeltaRays && this->ProbablyDeltaRay(pMainMC, pMainParentMC))
             {
+                // Too short to be detected
                 if ((pMainMC->GetVertex() - pMainMC->GetEndpoint()).GetMagnitudeSquared() < pow(4.67 / 2, 2)) // half a wire pitch
                 {
                     pMainMC = pMainParentMC;
                 }
-                else
+                else // overlaps with the parent track
                 {
                     float mainParentWeight{std::numeric_limits<float>::lowest()};
                     for (const auto &[pMC, weight] : weightMap)
@@ -105,7 +106,7 @@ StatusCode CheatedTwoDClusteringAlgorithm::Run()
                             break;
                         }
                     }
-                    if (mainParentWeight > 0.02f) // Arbitrary threshold for "non-negligible" contributio not the hit
+                    if (mainParentWeight > 0.05f) // Arbitrary threshold for "non-negligible" contribution to the hit
                     {
                         pMainMC = pMainParentMC;
                     }
