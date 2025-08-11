@@ -130,7 +130,7 @@ StatusCode DLShowerGrowingAlgorithm::PrepareTrainingSample()
             const double z{static_cast<double>(pCaloHit->GetPositionVector().GetZ())};
             const double zRel{z - static_cast<double>(viewToVtxPos.at(view).GetZ())};
 
-            const double rRel{pow(xRel, 2.) + pow(zRel, 2.)};
+            const double rRel{std::sqrt(pow(xRel, 2.) + pow(zRel, 2.))};
             const double cosThetaRel{ rRel != 0. ? xRel / rRel : 0. };
             const double sinThetaRel{ rRel != 0. ? zRel / rRel : 0. };
 
