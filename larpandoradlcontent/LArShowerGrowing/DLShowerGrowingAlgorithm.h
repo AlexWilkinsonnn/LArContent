@@ -45,10 +45,28 @@ private:
      */ 
     pandora::StatusCode Infer();
 
+    const pandora::MCParticle* GetMainMC(
+        const pandora::CaloHit *const pCaloHit,
+        std::map<const pandora::MCParticle *const, const pandora::MCParticle *const> &mcFoldTo) const;
+
+    const pandora::MCParticle* FoldMCTo(const pandora::MCParticle *const pMC) const;
+
+    bool CausesShower(const pandora::MCParticle *const pMC, int nDescendentElectrons) const;
+
+    const pandora::MCParticle* FoldPotentialDeltaRayTo(const pandora::CaloHit *const pCaloHit, const pandora::MCParticle *const pMC) const;
+
+    bool IsEM(const pandora::MCParticle *const pMC) const;
+
+    // members
+    std::map<pandora::HitType, float> m_deltaRayLengthThresholdSquared; ///< Threshold for defining small delta rays that will be folded to the parent particle
+    float m_deltaRayParentWeightThreshold;  ///< Threshold for weight contribution of parent particle for it take the delta ray's hit
+
+    // members that may be set from the xml
     bool m_trainingMode;                       ///< Training mode
     std::string m_trainingTreeName;            ///< Tree name for training data output
     std::string m_trainingFileName;            ///< File name for training data output
-    pandora::StringVector m_clusterListNames;  ///< Names of input cluster lists
+    pandora::StringVector m_clusterListNames;  ///< Names of cluster lists
+    std::string m_vertexListName;              ///< Names of vertex list
 };
 
 } // namespace lar_dl_content
