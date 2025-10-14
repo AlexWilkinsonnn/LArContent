@@ -11,6 +11,7 @@
 #include "larpandoracontent/LArHelpers/LArClusterHelper.h"
 #include "larpandoracontent/LArHelpers/LArGeometryHelper.h"
 #include "larpandoracontent/LArHelpers/LArMCParticleHelper.h"
+#include "larpandoracontent/LArHelpers/LArFileHelper.h"
 
 using namespace pandora;
 using namespace lar_content;
@@ -21,8 +22,23 @@ namespace lar_dl_content
 DLShowerGrowingAlgorithm::DLShowerGrowingAlgorithm() :
     m_deltaRayLengthThresholdSquared{std::map<HitType, float>{}},
     m_deltaRayParentWeightThreshold{0.f},
+    m_hitFeatureDim{12},
     m_trainingMode{false},
     m_trainingTreeName{""}
+{
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+DLShowerGrowingAlgorithm::HitFeatures::HitFeatures() :
+    m_xRel{0.f},
+    m_zRel{0.f},
+    m_rRel{0.f},
+    m_cosThetaRel{0.f},
+    m_sinThetaRel{0.f},
+    m_distToXGap{0.f},
+    m_xWidth{0.f},
+    m_energy{0.f}
 {
 }
 
@@ -43,6 +59,10 @@ DLShowerGrowingAlgorithm::~DLShowerGrowingAlgorithm()
         }
         PANDORA_MONITORING_API(SaveTree(this->GetPandora(), m_trainingTreeName + "_view_data", m_trainingFileName, "UPDATE"));
 
+        const LArGeometryHelper::DetectorBoundaries detBounds{LArGeometryHelper::GetDetectorBoundaries(this->GetPandora())};
+        std::cout << "x: " << detBounds.m_xBoundaries.first << " - " << detBounds.m_xBoundaries.second << "\n";
+        std::cout << "z: " << detBounds.m_zBoundaries.first << " - " << detBounds.m_zBoundaries.second << "\n";
+        std::cout << "y: " << detBounds.m_yBoundaries.first << " - " << detBounds.m_yBoundaries.second << "\n";
     }
 }
 
@@ -67,26 +87,9 @@ StatusCode DLShowerGrowingAlgorithm::PrepareTrainingSample()
     // NOTE Other features:
     // - hit distances to nearest X and Z gaps (XXX only the cathode gap seems to be in the 1x2x6 geometry?)
 
-    const VertexList *pVertexList{nullptr};
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, m_vertexListName, pVertexList));
-    const Vertex *const pVertex{pVertexList->front()};
-    if (pVertex->GetVertexType() != VERTEX_3D)
-    {
-        return STATUS_CODE_INVALID_PARAMETER;
-    }
-    std::map<HitType, CartesianVector> viewToVtxPos = {
-        { TPC_VIEW_U, LArGeometryHelper::ProjectPosition(this->GetPandora(), pVertex->GetPosition(), TPC_VIEW_U) },
-        { TPC_VIEW_V, LArGeometryHelper::ProjectPosition(this->GetPandora(), pVertex->GetPosition(), TPC_VIEW_V) },
-        { TPC_VIEW_W, LArGeometryHelper::ProjectPosition(this->GetPandora(), pVertex->GetPosition(), TPC_VIEW_W) }};
+    const std::map<HitType, CartesianVector> viewToVtxPos{this->Get2DVertices()};
 
-    // Gather clusters
-    ClusterList clusterList;
-    for (std::string listName : m_clusterListNames)
-    {
-        const ClusterList *pClusterList{nullptr};
-        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, listName, pClusterList));
-        clusterList.insert(clusterList.end(), pClusterList->begin(), pClusterList->end());
-    }
+    const ClusterList clusterList{this->GetAllClusters()};
 
     int currClusterID{0}, currMCID{0};
     std::map<const MCParticle* const, int> mcToID = { { nullptr, -1 } }, mcToPDG = { { nullptr, 0 } };
@@ -102,16 +105,7 @@ StatusCode DLShowerGrowingAlgorithm::PrepareTrainingSample()
 
     std::map<const MCParticle *const, const MCParticle *const> mcFoldTo;
 
-    std::set<double> xGaps;
-    for (const DetectorGap *const pDetectorGap : this->GetPandora().GetGeometry()->GetDetectorGapList())
-    {
-        const LineGap *const pLineGap = dynamic_cast<const LineGap *>(pDetectorGap);
-        if (pLineGap->GetLineGapType() == TPC_DRIFT_GAP)
-        {
-            xGaps.insert(static_cast<double>(pLineGap->GetLineStartX()));
-            xGaps.insert(static_cast<double>(pLineGap->GetLineEndX()));
-        }
-    }
+    const std::set<double> xGaps{this->GetDetectorXGaps()};
 
     for (const Cluster *const pCluster : clusterList)
     {
@@ -119,30 +113,13 @@ StatusCode DLShowerGrowingAlgorithm::PrepareTrainingSample()
         clusterView.emplace_back(static_cast<int>(view));
         clusterID.emplace_back(currClusterID);
 
-        const CaloHitList &isolatedHits{pCluster->GetIsolatedCaloHitList()};
         CaloHitList clusterCaloHits;
-        pCluster->GetOrderedCaloHitList().FillCaloHitList(clusterCaloHits);
-        clusterCaloHits.insert(clusterCaloHits.end(), isolatedHits.begin(), isolatedHits.end());
+        LArClusterHelper::GetAllHits(pCluster, clusterCaloHits);
         for (const CaloHit *const pCaloHit : clusterCaloHits)
         {
-            const double x{static_cast<double>(pCaloHit->GetPositionVector().GetX())};
-            const double xRel{x - static_cast<double>(viewToVtxPos.at(view).GetX())};
-            const double z{static_cast<double>(pCaloHit->GetPositionVector().GetZ())};
-            const double zRel{z - static_cast<double>(viewToVtxPos.at(view).GetZ())};
-
-            const double rRel{std::sqrt(pow(xRel, 2.) + pow(zRel, 2.))};
-            const double cosThetaRel{ rRel != 0. ? xRel / rRel : 0. };
-            const double sinThetaRel{ rRel != 0. ? zRel / rRel : 0. };
-
-            double distToXGap{std::numeric_limits<double>::max()};
-            for (const double xGap : xGaps)
-            {
-                const double dist{x - xGap};
-                if (std::abs(dist) < std::abs(distToXGap))
-                {
-                    distToXGap = dist;
-                }
-            }
+            HitFeatures hitFeatures;
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+                this->CalculateHitFeatures(pCaloHit, viewToVtxPos.at(view), xGaps, hitFeatures));
 
             const MCParticle *const pMainMC{this->GetMainMC(pCaloHit, mcFoldTo)};
             if (mcToID.find(pMainMC) == mcToID.end())
@@ -155,18 +132,14 @@ StatusCode DLShowerGrowingAlgorithm::PrepareTrainingSample()
 
             hitClusterID.emplace_back(currClusterID);
 
-            hitXRelPos.emplace_back(static_cast<float>(xRel));
-            hitZRelPos.emplace_back(static_cast<float>(zRel));
-
-            hitRRelPos.emplace_back(static_cast<float>(rRel));
-            hitCosThetaRelPos.emplace_back(static_cast<float>(cosThetaRel));
-            hitSinThetaRelPos.emplace_back(static_cast<float>(sinThetaRel));
-
-            hitXWidth.emplace_back(pCaloHit->GetCellSize1());
-
-            hitDistToXGap.emplace_back(static_cast<float>(distToXGap));
-
-            hitEnergy.emplace_back(pCaloHit->GetMipEquivalentEnergy());
+            hitXRelPos.emplace_back(hitFeatures.m_xRel);
+            hitZRelPos.emplace_back(hitFeatures.m_zRel);
+            hitRRelPos.emplace_back(hitFeatures.m_rRel);
+            hitCosThetaRelPos.emplace_back(hitFeatures.m_cosThetaRel);
+            hitSinThetaRelPos.emplace_back(hitFeatures.m_sinThetaRel);
+            hitXWidth.emplace_back(hitFeatures.m_xWidth);
+            hitDistToXGap.emplace_back(hitFeatures.m_distToXGap);
+            hitEnergy.emplace_back(hitFeatures.m_energy);
 
             hitMCID.emplace_back(mcToID.at(pMainMC));
         }
@@ -346,8 +319,170 @@ bool DLShowerGrowingAlgorithm::CausesShower(const MCParticle *const pMC, int nDe
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
+std::map<HitType, CartesianVector> DLShowerGrowingAlgorithm::Get2DVertices() const
+{
+    const VertexList *pVertexList{nullptr};
+    PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, m_vertexListName, pVertexList));
+    const Vertex *const pVertex{pVertexList->front()};
+    PANDORA_THROW_IF(STATUS_CODE_INVALID_PARAMETER, pVertex->GetVertexType() != VERTEX_3D);
+    return {
+        { TPC_VIEW_U, LArGeometryHelper::ProjectPosition(this->GetPandora(), pVertex->GetPosition(), TPC_VIEW_U) },
+        { TPC_VIEW_V, LArGeometryHelper::ProjectPosition(this->GetPandora(), pVertex->GetPosition(), TPC_VIEW_V) },
+        { TPC_VIEW_W, LArGeometryHelper::ProjectPosition(this->GetPandora(), pVertex->GetPosition(), TPC_VIEW_W) }};
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+std::map<HitType, ClusterList> DLShowerGrowingAlgorithm::Get2DClusters() const
+{
+    const ClusterList clusterList{this->GetAllClusters()};
+    ClusterList clusterListU, clusterListV, clusterListW;
+    LArClusterHelper::GetClustersUVW(clusterList, clusterListU, clusterListV, clusterListW);
+    return { { TPC_VIEW_U, clusterListU }, { TPC_VIEW_V, clusterListV }, { TPC_VIEW_W, clusterListW } };
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+ClusterList DLShowerGrowingAlgorithm::GetAllClusters() const
+{
+    ClusterList clusterList;
+    for (std::string listName : m_clusterListNames)
+    {
+        const ClusterList *pClusterList{nullptr};
+        PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, listName, pClusterList));
+        clusterList.insert(clusterList.end(), pClusterList->begin(), pClusterList->end());
+    }
+    return clusterList;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+std::set<double> DLShowerGrowingAlgorithm::GetDetectorXGaps() const
+{
+    std::set<double> xGaps;
+    for (const DetectorGap *const pDetectorGap : this->GetPandora().GetGeometry()->GetDetectorGapList())
+    {
+        const LineGap *const pLineGap = dynamic_cast<const LineGap *>(pDetectorGap);
+        if (pLineGap->GetLineGapType() == TPC_DRIFT_GAP)
+        {
+            xGaps.insert(static_cast<double>(pLineGap->GetLineStartX()));
+            xGaps.insert(static_cast<double>(pLineGap->GetLineEndX()));
+        }
+    }
+    return xGaps;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLShowerGrowingAlgorithm::CalculateHitFeatures(
+    const CaloHit *const pCaloHit, CartesianVector vtxPos, std::set<double> xGaps, HitFeatures &hitFeatures) const
+{
+    const double x{static_cast<double>(pCaloHit->GetPositionVector().GetX())};
+    const double xRel{x - static_cast<double>(vtxPos.GetX())};
+    const double z{static_cast<double>(pCaloHit->GetPositionVector().GetZ())};
+    const double zRel{z - static_cast<double>(vtxPos.GetZ())};
+
+    const double rRel{std::sqrt(pow(xRel, 2.) + pow(zRel, 2.))};
+    const double cosThetaRel{ rRel != 0. ? xRel / rRel : 0. };
+    const double sinThetaRel{ rRel != 0. ? zRel / rRel : 0. };
+
+    double distToXGap{std::numeric_limits<double>::max()};
+    for (const double xGap : xGaps)
+    {
+        const double dist{x - xGap};
+        if (std::abs(dist) < std::abs(distToXGap))
+        {
+            distToXGap = dist;
+        }
+    }
+
+    hitFeatures.m_xRel = static_cast<float>(xRel);
+    hitFeatures.m_zRel = static_cast<float>(zRel);
+    hitFeatures.m_rRel = static_cast<float>(rRel);
+    hitFeatures.m_cosThetaRel = static_cast<float>(cosThetaRel);
+    hitFeatures.m_sinThetaRel = static_cast<float>(sinThetaRel);
+    hitFeatures.m_distToXGap = static_cast<float>(distToXGap);
+    hitFeatures.m_xWidth = pCaloHit->GetCellSize1();
+    hitFeatures.m_energy = pCaloHit->GetMipEquivalentEnergy();
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
 StatusCode DLShowerGrowingAlgorithm::Infer()
 {
+    const std::map<HitType, CartesianVector> viewToVtxPos{this->Get2DVertices()};
+    const std::map<HitType, ClusterList> viewToClusterList{this->Get2DClusters()};
+    const std::set<double> xGaps{this->GetDetectorXGaps()};
+
+    for (const auto &[view, clusterList] : viewToClusterList)
+    {
+        std::vector<torch::Tensor> tensorEncodedClusters;
+        for (const Cluster *const pCluster : clusterList)
+        {
+            CaloHitList clusterCaloHits;
+            LArClusterHelper::GetAllHits(pCluster, clusterCaloHits);
+
+            std::vector<HitFeatures> clusterFeatures;
+            for (const CaloHit *const pCaloHit : clusterCaloHits)
+            {
+                HitFeatures hitFeatures;
+                PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+                    this->CalculateHitFeatures(pCaloHit, viewToVtxPos.at(view), xGaps, hitFeatures));
+                clusterFeatures.emplace_back(hitFeatures);
+
+                LArDLHelper::TorchInput tensorCluster;
+                PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MakeClusterTensor(clusterFeatures, view, tensorCluster));
+                torch::Tensor tensorEncodedCluster{m_modelEncoder.forward({tensorCluster}).toTensor()};
+                tensorEncodedClusters.emplace_back(tensorEncodedCluster);
+            }
+        }
+        std::cout << tensorEncodedClusters.size() << "\n";
+    }
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLShowerGrowingAlgorithm::MakeClusterTensor(
+    const std::vector<HitFeatures> &clusterFeatures, const HitType view, LArDLHelper::TorchInput &tensorCluster) const
+{
+    const int nHits{static_cast<int>(clusterFeatures.size())};
+
+    LArDLHelper::InitialiseInput({1, nHits, m_hitFeatureDim}, tensorCluster);
+    auto accessor = tensorCluster.accessor<float, 3>();
+
+    for (int i = 0; i < nHits; i++)
+    {
+        const HitFeatures hitFeatures{clusterFeatures.at(i)};
+        accessor[0][i][0] = hitFeatures.m_rRel;
+        accessor[0][i][1] = hitFeatures.m_cosThetaRel;
+        accessor[0][i][2] = hitFeatures.m_sinThetaRel;
+        accessor[0][i][3] = hitFeatures.m_xRel;
+        accessor[0][i][4] = hitFeatures.m_zRel;
+        accessor[0][i][5] = hitFeatures.m_xWidth;
+        accessor[0][i][6] = LArGeometryHelper::GetWirePitch(this->GetPandora(), view);
+        accessor[0][i][7] = hitFeatures.m_distToXGap;
+        accessor[0][i][8] = hitFeatures.m_energy;
+        accessor[0][i][9] = 0.f;
+        accessor[0][i][10] = 0.f;
+        accessor[0][i][11] = 0.f;
+        if (view == TPC_VIEW_U)
+        {
+            accessor[0][i][9] = 1.f;
+        }
+        else if (view == TPC_VIEW_V)
+        {
+            accessor[0][i][10] = 1.f;
+        }
+        else
+        {
+            accessor[0][i][11] = 1.f;
+        }
+    }
+
     return STATUS_CODE_SUCCESS;
 }
 
@@ -361,6 +496,19 @@ StatusCode DLShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
     {
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "TrainingTreeName", m_trainingTreeName));
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "TrainingFileName", m_trainingFileName));
+    }
+    else
+    {
+        std::string modelEncoderName, modelAttnName, modelSimName;
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "ModelEncoderFileName", modelEncoderName));
+        modelEncoderName = LArFileHelper::FindFileInPath(modelEncoderName, "FW_SEARCH_PATH");
+        LArDLHelper::LoadModel(modelEncoderName, m_modelEncoder);
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "ModelAttnFileName", modelAttnName));
+        modelAttnName = LArFileHelper::FindFileInPath(modelAttnName, "FW_SEARCH_PATH");
+        LArDLHelper::LoadModel(modelAttnName, m_modelAttn);
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "ModelSimFileName", modelSimName));
+        modelSimName = LArFileHelper::FindFileInPath(modelSimName, "FW_SEARCH_PATH");
+        LArDLHelper::LoadModel(modelSimName, m_modelSim);
     }
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
