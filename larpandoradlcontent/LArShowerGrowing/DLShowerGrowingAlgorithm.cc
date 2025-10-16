@@ -6,6 +6,8 @@
  *  $Log: $
  */
 
+#include <torch/torch.h>
+
 #include "larpandoradlcontent/LArShowerGrowing/DLShowerGrowingAlgorithm.h"
 
 #include "larpandoracontent/LArHelpers/LArClusterHelper.h"
@@ -20,6 +22,9 @@ namespace lar_dl_content
 {
 
 DLShowerGrowingAlgorithm::DLShowerGrowingAlgorithm() :
+    m_polarRScaleFactor{1.f},
+    m_cartesianXScaleFactor{1.f},
+    m_cartesianZScaleFactor{1.f},
     m_deltaRayLengthThresholdSquared{std::map<HitType, float>{}},
     m_deltaRayParentWeightThreshold{0.f},
     m_hitFeatureDim{12},
@@ -331,28 +336,36 @@ std::map<HitType, CartesianVector> DLShowerGrowingAlgorithm::Get2DVertices() con
         { TPC_VIEW_W, LArGeometryHelper::ProjectPosition(this->GetPandora(), pVertex->GetPosition(), TPC_VIEW_W) }};
 }
 
-//-----------------------------------------------------------------------------------------------------------------------------------------
+////-----------------------------------------------------------------------------------------------------------------------------------------
 
-std::map<HitType, ClusterList> DLShowerGrowingAlgorithm::Get2DClusters() const
-{
-    const ClusterList clusterList{this->GetAllClusters()};
-    ClusterList clusterListU, clusterListV, clusterListW;
-    LArClusterHelper::GetClustersUVW(clusterList, clusterListU, clusterListV, clusterListW);
-    return { { TPC_VIEW_U, clusterListU }, { TPC_VIEW_V, clusterListV }, { TPC_VIEW_W, clusterListW } };
-}
+//std::map<HitType, ClusterList> DLShowerGrowingAlgorithm::Get2DClusters() const
+//{
+//    const ClusterList clusterList{this->GetAllClusters()};
+//    ClusterList clusterListU, clusterListV, clusterListW;
+//    LArClusterHelper::GetClustersUVW(clusterList, clusterListU, clusterListV, clusterListW);
+//    return { { TPC_VIEW_U, clusterListU }, { TPC_VIEW_V, clusterListV }, { TPC_VIEW_W, clusterListW } };
+//}
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 ClusterList DLShowerGrowingAlgorithm::GetAllClusters() const
 {
     ClusterList clusterList;
-    for (std::string listName : m_clusterListNames)
+    for (const std::string &listName : m_clusterListNames)
     {
-        const ClusterList *pClusterList{nullptr};
-        PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, listName, pClusterList));
-        clusterList.insert(clusterList.end(), pClusterList->begin(), pClusterList->end());
+        PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetClusters(listName, clusterList));
     }
     return clusterList;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLShowerGrowingAlgorithm::GetClusters(const std::string clusterListName, ClusterList &clusterList) const
+{
+    const ClusterList *pClusterList{nullptr};
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, clusterListName, pClusterList));
+    clusterList.insert(clusterList.end(), pClusterList->begin(), pClusterList->end());
+    return STATUS_CODE_SUCCESS;
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
@@ -413,32 +426,77 @@ StatusCode DLShowerGrowingAlgorithm::CalculateHitFeatures(
 StatusCode DLShowerGrowingAlgorithm::Infer()
 {
     const std::map<HitType, CartesianVector> viewToVtxPos{this->Get2DVertices()};
-    const std::map<HitType, ClusterList> viewToClusterList{this->Get2DClusters()};
     const std::set<double> xGaps{this->GetDetectorXGaps()};
 
-    for (const auto &[view, clusterList] : viewToClusterList)
+    for (const std::string &listName : m_clusterListNames)
     {
+        ClusterList clusterList;
+        PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetClusters(listName, clusterList));
+        if (clusterList.empty())
+        {
+            continue;
+        }
+        const HitType view{LArClusterHelper::GetClusterHitType(clusterList.front())};
+
         std::vector<torch::Tensor> tensorEncodedClusters;
         for (const Cluster *const pCluster : clusterList)
         {
+            PANDORA_RETURN_IF(STATUS_CODE_NOT_INITIALIZED, !pCluster || pCluster->GetNCaloHits() == 0);
+            PANDORA_RETURN_IF(STATUS_CODE_FAILURE, LArClusterHelper::GetClusterHitType(pCluster) != view);
+
             CaloHitList clusterCaloHits;
             LArClusterHelper::GetAllHits(pCluster, clusterCaloHits);
 
             std::vector<HitFeatures> clusterFeatures;
             for (const CaloHit *const pCaloHit : clusterCaloHits)
             {
+                PANDORA_RETURN_IF(STATUS_CODE_NOT_INITIALIZED, !pCaloHit);
                 HitFeatures hitFeatures;
                 PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
                     this->CalculateHitFeatures(pCaloHit, viewToVtxPos.at(view), xGaps, hitFeatures));
                 clusterFeatures.emplace_back(hitFeatures);
-
-                LArDLHelper::TorchInput tensorCluster;
-                PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MakeClusterTensor(clusterFeatures, view, tensorCluster));
-                torch::Tensor tensorEncodedCluster{m_modelEncoder.forward({tensorCluster}).toTensor()};
-                tensorEncodedClusters.emplace_back(tensorEncodedCluster);
             }
+
+            torch::Tensor tensorCluster;
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MakeClusterTensor(clusterFeatures, view, tensorCluster));
+            // std::cout << "Cluster Shape: [ ";
+            // for (auto d : tensorCluster.sizes())
+            //     std::cout << d << " ";
+            // std::cout << "]\n";
+            torch::Tensor tensorEncodedCluster{m_modelEncoder.forward({tensorCluster}).toTensor()};
+            tensorEncodedClusters.emplace_back(tensorEncodedCluster);
+            // std::cout << "Encoded Cluster Shape: [ ";
+            // for (auto d : tensorEncodedCluster.sizes())
+            //     std::cout << d << " ";
+            // std::cout << "]\n";
         }
-        std::cout << tensorEncodedClusters.size() << "\n";
+        torch::Tensor tensorEncodedEvent{torch::cat(tensorEncodedClusters, 1)};
+        tensorEncodedClusters.clear(); // Free memory
+        std::cout << "\nEncoded Event Shape: [ ";
+        for (auto d : tensorEncodedEvent.sizes())
+            std::cout << d << " ";
+        std::cout << "]\n";
+
+        torch::Tensor tensorAttnEvent{m_modelAttn.forward({tensorEncodedEvent}).toTensor()};
+        tensorEncodedEvent = torch::Tensor(); // Free memory
+        std::cout << "Attn Event Shape: [ ";
+        for (auto d : tensorAttnEvent.sizes())
+            std::cout << d << " ";
+        std::cout << "]\n";
+
+        torch::Tensor tensorSimMat{m_modelSim.forward({tensorAttnEvent}).toTensor()};
+        tensorAttnEvent = torch::Tensor();
+        std::cout << "Output Sim Matrix Shape: [ ";
+        for (auto d : tensorSimMat.sizes())
+            std::cout << d << " ";
+        std::cout << "]\n\n";
+
+        SimilarityMatrix clusterSimMat;
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->PopulateClusterSimilarityMatrix(tensorSimMat, clusterList, clusterSimMat));
+        tensorSimMat = torch::Tensor();
+        std::cout << clusterSimMat.size() << "\n";
+
+        // Now I need to do the clustering...
     }
 
     return STATUS_CODE_SUCCESS;
@@ -447,25 +505,25 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode DLShowerGrowingAlgorithm::MakeClusterTensor(
-    const std::vector<HitFeatures> &clusterFeatures, const HitType view, LArDLHelper::TorchInput &tensorCluster) const
+    const std::vector<HitFeatures> &clusterFeatures, const HitType view, torch::Tensor &tensorCluster) const
 {
     const int nHits{static_cast<int>(clusterFeatures.size())};
 
-    LArDLHelper::InitialiseInput({1, nHits, m_hitFeatureDim}, tensorCluster);
+    tensorCluster = torch::zeros({1, nHits, m_hitFeatureDim});
     auto accessor = tensorCluster.accessor<float, 3>();
 
     for (int i = 0; i < nHits; i++)
     {
         const HitFeatures hitFeatures{clusterFeatures.at(i)};
-        accessor[0][i][0] = hitFeatures.m_rRel;
+        accessor[0][i][0] = hitFeatures.m_rRel * m_polarRScaleFactor;
         accessor[0][i][1] = hitFeatures.m_cosThetaRel;
         accessor[0][i][2] = hitFeatures.m_sinThetaRel;
-        accessor[0][i][3] = hitFeatures.m_xRel;
-        accessor[0][i][4] = hitFeatures.m_zRel;
-        accessor[0][i][5] = hitFeatures.m_xWidth;
-        accessor[0][i][6] = LArGeometryHelper::GetWirePitch(this->GetPandora(), view);
-        accessor[0][i][7] = hitFeatures.m_distToXGap;
-        accessor[0][i][8] = hitFeatures.m_energy;
+        accessor[0][i][3] = hitFeatures.m_xRel * m_cartesianXScaleFactor;
+        accessor[0][i][4] = hitFeatures.m_zRel * m_cartesianZScaleFactor;
+        accessor[0][i][5] = hitFeatures.m_xWidth * m_cartesianXScaleFactor;
+        accessor[0][i][6] = LArGeometryHelper::GetWirePitch(this->GetPandora(), view) * m_cartesianZScaleFactor;
+        accessor[0][i][7] = hitFeatures.m_distToXGap * m_cartesianXScaleFactor;
+        accessor[0][i][8] = std::log(hitFeatures.m_energy);
         accessor[0][i][9] = 0.f;
         accessor[0][i][10] = 0.f;
         accessor[0][i][11] = 0.f;
@@ -480,6 +538,31 @@ StatusCode DLShowerGrowingAlgorithm::MakeClusterTensor(
         else
         {
             accessor[0][i][11] = 1.f;
+        }
+    }
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLShowerGrowingAlgorithm::PopulateClusterSimilarityMatrix(
+    const torch::Tensor &tensorSimMat, const ClusterList &clusterList, SimilarityMatrix &clusterSimilarityMatrix) const
+{
+    PANDORA_RETURN_IF(STATUS_CODE_NOT_ALLOWED, !clusterSimilarityMatrix.empty());
+    const int64_t nClusters{static_cast<int64_t>(clusterList.size())};
+    PANDORA_RETURN_IF(STATUS_CODE_NOT_ALLOWED,
+        tensorSimMat.dim() != 3 || nClusters != tensorSimMat.size(-1) || nClusters != tensorSimMat.size(-2));
+
+    auto accessor = tensorSimMat.accessor<float, 3>();
+
+    auto iterI{clusterList.begin()};
+    for (int i = 0; i < nClusters; i++, iterI++)
+    {
+        auto iterJ{clusterList.begin()};
+        for (int j = 0; j < nClusters; j++, iterJ++)
+        {
+            clusterSimilarityMatrix[*iterI][*iterJ] = accessor[0][i][j];
         }
     }
 
@@ -521,6 +604,15 @@ StatusCode DLShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
         { TPC_VIEW_V, static_cast<float>(pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_V), 2.)) },
         { TPC_VIEW_W, static_cast<float>(pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_W), 2.)) }
     };
+
+    const LArGeometryHelper::DetectorBoundaries detBounds{LArGeometryHelper::GetDetectorBoundaries(this->GetPandora())};
+    double xLow{static_cast<double>(detBounds.m_xBoundaries.first)}, xHigh{static_cast<double>(detBounds.m_xBoundaries.second)};
+    double yLow{static_cast<double>(detBounds.m_yBoundaries.first)}, yHigh{static_cast<double>(detBounds.m_yBoundaries.second)};
+    double zLow{static_cast<double>(detBounds.m_zBoundaries.first)}, zHigh{static_cast<double>(detBounds.m_zBoundaries.second)};
+    m_polarRScaleFactor = static_cast<float>(
+        1. / std::sqrt(std::pow(xHigh - xLow, 2.) + std::pow(yHigh - yLow, 2.) + std::pow(zHigh - zLow, 2.)));
+    m_cartesianXScaleFactor = static_cast<float>(1. / (xHigh - xLow));
+    m_cartesianZScaleFactor = static_cast<float>(1. / (zHigh - zLow));
 
     return STATUS_CODE_SUCCESS;
 }

@@ -8,6 +8,8 @@
 #ifndef LAR_DL_SHOWER_GROWING_ALGORITHM
 #define LAR_DL_SHOWER_GROWING_ALGORITHM 1
 
+#include <torch/torch.h>
+
 #include "Pandora/Algorithm.h"
 #include "Pandora/AlgorithmHeaders.h"
 
@@ -49,6 +51,8 @@ public:
     virtual ~DLShowerGrowingAlgorithm();
 
 private:
+    typedef std::map<const pandora::Cluster *const, std::map<const pandora::Cluster *const, float>> SimilarityMatrix;
+
     pandora::StatusCode Run();
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
 
@@ -84,7 +88,9 @@ private:
 
     pandora::ClusterList GetAllClusters() const;
 
-    std::map<pandora::HitType, pandora::ClusterList> Get2DClusters() const;
+    // std::map<pandora::HitType, pandora::ClusterList> Get2DClusters() const;
+
+    pandora::StatusCode GetClusters(const std::string clusterListName, pandora::ClusterList &clusterList) const;
 
     std::set<double> GetDetectorXGaps() const;
 
@@ -99,7 +105,10 @@ private:
     /* Start inference methods */
 
     pandora::StatusCode MakeClusterTensor(
-        const std::vector<HitFeatures> &clusterFeatures, const pandora::HitType view, LArDLHelper::TorchInput &tensorCluster) const;
+        const std::vector<HitFeatures> &clusterFeatures, const pandora::HitType view, torch::Tensor &tensorCluster) const;
+
+    pandora::StatusCode PopulateClusterSimilarityMatrix(
+        const torch::Tensor &tensorSimMat, const pandora::ClusterList &clusterList, SimilarityMatrix &clusterSimilarityMatrix) const;
 
     /* End inference methods */
 
@@ -108,6 +117,9 @@ private:
     LArDLHelper::TorchModel m_modelEncoder; ///< TorchScript model for encoding hits in a cluster, set by "ModelEncoderFileName"
     LArDLHelper::TorchModel m_modelAttn; ///< TorchScript model for attention over encoded clusters in a view, set by "ModelAttnFileName"
     LArDLHelper::TorchModel m_modelSim; ///< TorchScript model for pairwise similarities over clusters after attention, set by "ModelSimFileName"
+    float m_polarRScaleFactor; ///< Scale factor for polar r coordinate input features
+    float m_cartesianXScaleFactor; ///< Scale factor for cartesian x coordinate input features
+    float m_cartesianZScaleFactor; ///< Scale factor for cartesian z coordinate input features
 
     /* End shared mutable members */
 
