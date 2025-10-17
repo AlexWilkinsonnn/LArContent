@@ -52,6 +52,7 @@ public:
 
 private:
     typedef std::map<const pandora::Cluster *const, std::map<const pandora::Cluster *const, float>> SimilarityMatrix;
+    typedef std::map<const pandora::Cluster *const, std::vector<const pandora::Cluster *>> AdjacencyLists;
 
     pandora::StatusCode Run();
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
@@ -108,26 +109,40 @@ private:
         const std::vector<HitFeatures> &clusterFeatures, const pandora::HitType view, torch::Tensor &tensorCluster) const;
 
     pandora::StatusCode PopulateClusterSimilarityMatrix(
-        const torch::Tensor &tensorSimMat, const pandora::ClusterList &clusterList, SimilarityMatrix &clusterSimilarityMatrix) const;
+        const torch::Tensor &tensorSimMat, const pandora::ClusterList &clusterList, SimilarityMatrix &clusterSimMat) const;
+
+    pandora::StatusCode PopulateAdjacencyLists(
+        const SimilarityMatrix &simMat, AdjacencyLists &coreClusterAdjLists, AdjacencyLists &accClusterAdjLists) const;
+
+    pandora::StatusCode CalculateConnectedGroups(
+        const AdjacencyLists &clusterAdjLists, std::vector<std::unordered_set<const pandora::Cluster *>> &clusterGroups) const;
+
+    pandora::StatusCode AddClustersToGroups(
+        const SimilarityMatrix &clusterSimMat,
+        AdjacencyLists &ungroupedClusterAdjLists,
+        std::vector<std::unordered_set<const pandora::Cluster *>> &clusterGroups) const;
+
+    pandora::StatusCode MergeGroups(
+        const std::vector<std::unordered_set<const pandora::Cluster *>> &clusterGroups, const std::string &listNmae) const;
 
     /* End inference methods */
 
     /* Start shared mutable members */
 
     LArDLHelper::TorchModel m_modelEncoder; ///< TorchScript model for encoding hits in a cluster, set by "ModelEncoderFileName"
-    LArDLHelper::TorchModel m_modelAttn; ///< TorchScript model for attention over encoded clusters in a view, set by "ModelAttnFileName"
-    LArDLHelper::TorchModel m_modelSim; ///< TorchScript model for pairwise similarities over clusters after attention, set by "ModelSimFileName"
-    float m_polarRScaleFactor; ///< Scale factor for polar r coordinate input features
-    float m_cartesianXScaleFactor; ///< Scale factor for cartesian x coordinate input features
-    float m_cartesianZScaleFactor; ///< Scale factor for cartesian z coordinate input features
+    LArDLHelper::TorchModel m_modelAttn;    ///< TorchScript model for attention over encoded clusters in a view, set by "ModelAttnFileName"
+    LArDLHelper::TorchModel m_modelSim;     ///< TorchScript model for pairwise similarities over clusters after attention, set by "ModelSimFileName"
+    float m_polarRScaleFactor;              ///< Scale factor for polar r coordinate input features
+    float m_cartesianXScaleFactor;          ///< Scale factor for cartesian x coordinate input features
+    float m_cartesianZScaleFactor;          ///< Scale factor for cartesian z coordinate input features
 
     /* End shared mutable members */
 
     /* Start hardcoded members */
 
     std::map<pandora::HitType, float> m_deltaRayLengthThresholdSquared; ///< Threshold for defining small delta rays that will be folded to the parent particle
-    float m_deltaRayParentWeightThreshold;  ///< Threshold for weight contribution of parent particle for it take the delta ray's hit
-    int m_hitFeatureDim; ///< Feature dimensions of each hit
+    float m_deltaRayParentWeightThreshold;                              ///< Threshold for weight contribution of parent particle for it take the delta ray's hit
+    int m_hitFeatureDim;                                                ///< Feature dimensions of each hit
 
     /* End hardcoded members */
 
@@ -137,7 +152,9 @@ private:
     std::string m_trainingTreeName;            ///< Tree name for training data output
     std::string m_trainingFileName;            ///< File name for training data output
     pandora::StringVector m_clusterListNames;  ///< Names of cluster lists
-    std::string m_vertexListName;              ///< Names of vertex list
+    std::string m_vertexListName;              ///< Name of vertex list
+    float m_similarityThreshold;               ///< Threshold value on similarity for clusters to be connected
+    unsigned int m_accessoryClustersMaxHits;            ///< Clusters with this number of less hits are treated as accessory clusters during merging
 
     /* End configurable via xml members */
 };
