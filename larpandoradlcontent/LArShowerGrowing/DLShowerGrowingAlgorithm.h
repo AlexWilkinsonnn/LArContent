@@ -89,27 +89,29 @@ private:
 
     pandora::ClusterList GetAllClusters() const;
 
-    // std::map<pandora::HitType, pandora::ClusterList> Get2DClusters() const;
-
     pandora::StatusCode GetClusters(const std::string clusterListName, pandora::ClusterList &clusterList) const;
 
-    std::set<double> GetDetectorXGaps() const;
-
     pandora::StatusCode CalculateHitFeatures(
-        const pandora::CaloHit *const pCaloHit,
-        const pandora::CartesianVector vtxPos,
-        std::set<double> xGaps,
-        HitFeatures &hitFeatures) const;
+        const pandora::CaloHit *const pCaloHit, const pandora::CartesianVector vtxPos, HitFeatures &hitFeatures) const;
 
     /* End general helpers */
 
     /* Start inference methods */
+
+    pandora::StatusCode PredictClusterSimilarityMatrix(
+        const pandora::ClusterList &clusterList,
+        const pandora::HitType view,
+        const pandora::CartesianVector &vtxPos,
+        SimilarityMatrix &clusterSimMat);
 
     pandora::StatusCode MakeClusterTensor(
         const std::vector<HitFeatures> &clusterFeatures, const pandora::HitType view, torch::Tensor &tensorCluster) const;
 
     pandora::StatusCode PopulateClusterSimilarityMatrix(
         const torch::Tensor &tensorSimMat, const pandora::ClusterList &clusterList, SimilarityMatrix &clusterSimMat) const;
+
+    pandora::StatusCode ClusterFromSimilarity(
+        const SimilarityMatrix &clusterSimMat, std::vector<std::unordered_set<const pandora::Cluster *>> &clusterGroups) const;
 
     pandora::StatusCode PopulateAdjacencyLists(
         const SimilarityMatrix &simMat, AdjacencyLists &coreClusterAdjLists, AdjacencyLists &accClusterAdjLists) const;
@@ -135,6 +137,7 @@ private:
     float m_polarRScaleFactor;              ///< Scale factor for polar r coordinate input features
     float m_cartesianXScaleFactor;          ///< Scale factor for cartesian x coordinate input features
     float m_cartesianZScaleFactor;          ///< Scale factor for cartesian z coordinate input features
+    std::set<double> m_detectorXGaps;       ///< X coordinates where gaps in X direction start/end
 
     /* End shared mutable members */
 
