@@ -55,8 +55,11 @@ private:
         std::vector<int> m_isPrimary;
         std::vector<float> m_trueEnergy;
         std::vector<int> m_nTrueHits;
+        std::vector<float> m_trueHitsSumEnergy;
         std::vector<int> m_nMatchedCorrectHits;
+        std::vector<float> m_matchedCorrectHitsSumEnergy;
         std::vector<int> m_nMatchedTotalHits;
+        std::vector<float> m_matchedTotalHitsSumEnergy;
     };
 
 public:

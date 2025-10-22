@@ -64,8 +64,11 @@ EventClusterValidationAlgorithm::MatchedParticleMetrics::MatchedParticleMetrics(
     m_isPrimary{std::vector<int>{}},
     m_trueEnergy{std::vector<float>{}},
     m_nTrueHits{std::vector<int>{}},
+    m_trueHitsSumEnergy{std::vector<float>{}},
     m_nMatchedCorrectHits{std::vector<int>{}},
-    m_nMatchedTotalHits{std::vector<int>{}}
+    m_matchedCorrectHitsSumEnergy{std::vector<float>{}},
+    m_nMatchedTotalHits{std::vector<int>{}},
+    m_matchedTotalHitsSumEnergy{std::vector<float>{}}
 {
 }
 
@@ -630,26 +633,35 @@ void EventClusterValidationAlgorithm::GetMatchedParticleMetrics(
 {
     std::map<const MCParticle *const, const Cluster *> mcMatchedCluster;
     std::map<const MCParticle *const, int> mcMatchedClusterCorrectHits, mcMatchedClusterTotalHits, mcNTrueHits;
+    std::map<const MCParticle *const, float> mcMatchedClusterCorrectHitsSumEnergy, mcMatchedClusterTotalHitsSumEnergy, mcTrueHitsSumEnergy;
     for (const auto &[pCaloHit, parents] : hitParents)
     {
         if (mcMatchedCluster.find(parents.m_pMainMC) == mcMatchedCluster.end())
         {
             mcMatchedCluster.insert({parents.m_pMainMC, nullptr});
             mcMatchedClusterCorrectHits.insert({parents.m_pMainMC, 0});
+            mcMatchedClusterCorrectHitsSumEnergy.insert({parents.m_pMainMC, 0.f});
             mcMatchedClusterTotalHits.insert({parents.m_pMainMC, 0});
+            mcMatchedClusterTotalHitsSumEnergy.insert({parents.m_pMainMC, 0.f});
             mcNTrueHits.insert({parents.m_pMainMC, 0});
+            mcTrueHitsSumEnergy.insert({parents.m_pMainMC, 0.f});
         }
         mcNTrueHits.at(parents.m_pMainMC)++;
+        mcTrueHitsSumEnergy.at(parents.m_pMainMC) += pCaloHit->GetMipEquivalentEnergy();
     }
 
     std::map<const Cluster *const, std::map<const MCParticle *const, int>> clusterMCNHits;
+    std::map<const Cluster *const, std::map<const MCParticle *const, float>> clusterMCHitsSumEnergy;
     std::map<const Cluster *const, int> clusterNHits;
+    std::map<const Cluster *const, float> clusterHitsSumEnergy;
     for (const auto &[pCaloHit, parents] : hitParents)
     {
         if (parents.m_pCluster)
         {
             clusterMCNHits[parents.m_pCluster][parents.m_pMainMC]++;
+            clusterMCHitsSumEnergy[parents.m_pCluster][parents.m_pMainMC] += pCaloHit->GetMipEquivalentEnergy();
             clusterNHits[parents.m_pCluster]++;
+            clusterHitsSumEnergy[parents.m_pCluster] += pCaloHit->GetMipEquivalentEnergy();
         }
     }
 
@@ -684,14 +696,18 @@ void EventClusterValidationAlgorithm::GetMatchedParticleMetrics(
             }
             seenClusters.emplace_back(pCluster);
 
-            int nTotalHits{clusterNHits.at(pCluster)};
-            int nCorrectHits{clusterMCNHits.at(pCluster).at(pMatchedMC)};
+            const int nTotalHits{clusterNHits.at(pCluster)};
+            const float totalHitsSumEnergy{clusterHitsSumEnergy.at(pCluster)};
+            const int nCorrectHits{clusterMCNHits.at(pCluster).at(pMatchedMC)};
+            const float correctHitsSumEnergy{clusterMCHitsSumEnergy.at(pCluster).at(pMatchedMC)};
 
             if (isBetterMatch(pMatchedMC, nCorrectHits, nTotalHits, pCluster))
             {
                 mcMatchedCluster.at(pMatchedMC) = pCluster;
                 mcMatchedClusterCorrectHits.at(pMatchedMC) = nCorrectHits;
+                mcMatchedClusterCorrectHitsSumEnergy.at(pMatchedMC) = correctHitsSumEnergy;
                 mcMatchedClusterTotalHits.at(pMatchedMC) = nTotalHits;
+                mcMatchedClusterTotalHitsSumEnergy.at(pMatchedMC) = totalHitsSumEnergy;
             }
         }
     }
@@ -726,8 +742,10 @@ void EventClusterValidationAlgorithm::GetMatchedParticleMetrics(
                     continue;
                 }
                 const MCParticle *const pMC{it->second.front()}; it->second.pop_front();
-                const int nCorrectHits{clusterMCNHits.at(pCluster).at(pMC)};
                 const int nTotalHits{clusterNHits.at(pCluster)};
+                const float totalHitsSumEnergy{clusterHitsSumEnergy.at(pCluster)};
+                const int nCorrectHits{clusterMCNHits.at(pCluster).at(pMC)};
+                const float correctHitsSumEnergy{clusterMCHitsSumEnergy.at(pCluster).at(pMC)};
 
                 if (isBetterMatch(pMC, nCorrectHits, nTotalHits, pCluster))
                 {
@@ -736,7 +754,9 @@ void EventClusterValidationAlgorithm::GetMatchedParticleMetrics(
                     matchedClusters.insert(pCluster);
                     mcMatchedCluster.at(pMC) = pCluster;
                     mcMatchedClusterCorrectHits.at(pMC) = nCorrectHits;
+                    mcMatchedClusterCorrectHitsSumEnergy.at(pMC) = correctHitsSumEnergy;
                     mcMatchedClusterTotalHits.at(pMC) = nTotalHits;
+                    mcMatchedClusterTotalHitsSumEnergy.at(pMC) = totalHitsSumEnergy;
                 }
 
                 it++;
@@ -751,8 +771,11 @@ void EventClusterValidationAlgorithm::GetMatchedParticleMetrics(
         metrics.m_isPrimary.emplace_back(pMC->GetParentList().front()->IsRootParticle());
         metrics.m_trueEnergy.emplace_back(pMC->GetEnergy());
         metrics.m_nTrueHits.emplace_back(mcNTrueHits.at(pMC));
+        metrics.m_trueHitsSumEnergy.emplace_back(mcTrueHitsSumEnergy.at(pMC));
         metrics.m_nMatchedCorrectHits.emplace_back(mcMatchedClusterCorrectHits.at(pMC));
+        metrics.m_matchedCorrectHitsSumEnergy.emplace_back(mcMatchedClusterCorrectHitsSumEnergy.at(pMC));
         metrics.m_nMatchedTotalHits.emplace_back(mcMatchedClusterTotalHits.at(pMC));
+        metrics.m_matchedTotalHitsSumEnergy.emplace_back(mcMatchedClusterTotalHitsSumEnergy.at(pMC));
     }
 }
 
@@ -910,9 +933,15 @@ void EventClusterValidationAlgorithm::SetBranches(
             PANDORA_MONITORING_API(SetTreeVariable(
                 this->GetPandora(), m_treeName + "_matching", "n_true_hits", matchedParticleMetrics.m_nTrueHits.at(i)));
             PANDORA_MONITORING_API(SetTreeVariable(
+                this->GetPandora(), m_treeName + "_matching", "true_hits_sum_energy", matchedParticleMetrics.m_trueHitsSumEnergy.at(i)));
+            PANDORA_MONITORING_API(SetTreeVariable(
                 this->GetPandora(), m_treeName + "_matching", "n_correct_matched_hits", matchedParticleMetrics.m_nMatchedCorrectHits.at(i)));
             PANDORA_MONITORING_API(SetTreeVariable(
+                this->GetPandora(), m_treeName + "_matching", "correct_matched_hits_sum_energy", matchedParticleMetrics.m_matchedCorrectHitsSumEnergy.at(i)));
+            PANDORA_MONITORING_API(SetTreeVariable(
                 this->GetPandora(), m_treeName + "_matching", "n_total_matched_hits", matchedParticleMetrics.m_nMatchedTotalHits.at(i)));
+            PANDORA_MONITORING_API(SetTreeVariable(
+                this->GetPandora(), m_treeName + "_matching", "total_matched_hits_sum_energy", matchedParticleMetrics.m_matchedTotalHitsSumEnergy.at(i)));
             PANDORA_MONITORING_API(FillTree(this->GetPandora(), m_treeName + "_matching"));
         }
     }

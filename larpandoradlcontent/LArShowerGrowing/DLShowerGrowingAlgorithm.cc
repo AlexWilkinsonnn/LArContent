@@ -463,13 +463,13 @@ StatusCode DLShowerGrowingAlgorithm::PredictClusterSimilarityMatrix(
 
         torch::Tensor tensorCluster;
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MakeClusterTensor(clusterFeatures, view, tensorCluster));
-        torch::Tensor tensorEncodedCluster{m_modelEncoder.forward({tensorCluster}).toTensor()};
+        torch::InferenceMode guard; torch::Tensor tensorEncodedCluster{m_modelEncoder.forward({tensorCluster}).toTensor()};
         tensorEncodedClusters.emplace_back(tensorEncodedCluster);
     }
     torch::Tensor tensorEncodedEvent{torch::cat(tensorEncodedClusters, 1)};
     tensorEncodedClusters.clear(); // Free memory
 
-    torch::Tensor tensorAttnEvent{m_modelAttn.forward({tensorEncodedEvent}).toTensor()};
+    torch::InferenceMode guard; torch::Tensor tensorAttnEvent{m_modelAttn.forward({tensorEncodedEvent}).toTensor()};
     tensorEncodedEvent = torch::Tensor(); // Free memory
 
     torch::Tensor tensorSimMat{m_modelSim.forward({tensorAttnEvent}).toTensor()};
