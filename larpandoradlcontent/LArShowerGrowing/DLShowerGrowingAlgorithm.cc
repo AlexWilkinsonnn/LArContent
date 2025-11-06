@@ -21,6 +21,39 @@ using namespace lar_content;
 namespace lar_dl_content
 {
 
+DLShowerGrowingAlgorithm::HitFeatures::HitFeatures() :
+    m_xRel{0.f},
+    m_zRel{0.f},
+    m_rRel{0.f},
+    m_cosThetaRel{0.f},
+    m_sinThetaRel{0.f},
+    m_distToXGap{0.f},
+    m_xWidth{0.f},
+    m_energy{0.f}
+{
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+DLShowerGrowingAlgorithm::ClusterGroup::ClusterGroup() :
+    m_clusters{std::unordered_set<const Cluster *>()},
+    m_representativeCluster{nullptr}
+{
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+void DLShowerGrowingAlgorithm::ClusterGroup::Insert(const Cluster* pCluster)
+{
+    if (m_clusters.empty())
+    {
+        m_representativeCluster = pCluster;
+    }
+    m_clusters.insert(pCluster);
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
 DLShowerGrowingAlgorithm::DLShowerGrowingAlgorithm() :
     m_polarRScaleFactor{1.f},
     m_cartesianXScaleFactor{1.f},
@@ -33,20 +66,6 @@ DLShowerGrowingAlgorithm::DLShowerGrowingAlgorithm() :
     m_trainingTreeName{""},
     m_similarityThreshold{0.5f},
     m_accessoryClustersMaxHits{2}
-{
-}
-
-//-----------------------------------------------------------------------------------------------------------------------------------------
-
-DLShowerGrowingAlgorithm::HitFeatures::HitFeatures() :
-    m_xRel{0.f},
-    m_zRel{0.f},
-    m_rRel{0.f},
-    m_cosThetaRel{0.f},
-    m_sinThetaRel{0.f},
-    m_distToXGap{0.f},
-    m_xWidth{0.f},
-    m_energy{0.f}
 {
 }
 
@@ -429,6 +448,10 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
             PANDORA_RETURN_IF(STATUS_CODE_FAILURE,
                 totalGroupedClusters != clusterList.size() || uniqueGroupedClusters.size() != clusterList.size());
         }
+
+        // Second pass agressive merging
+
+
 
 
         // Make the merges

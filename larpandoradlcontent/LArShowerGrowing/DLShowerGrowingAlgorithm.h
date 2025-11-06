@@ -39,6 +39,21 @@ private:
         float m_energy;
     };
 
+    struct ClusterGroup
+    {
+        ClusterGroup();
+
+        void Insert(const pandora::Cluster *pCluster);
+        const pandora::Cluster *GetRepresentativeCluster() const { return m_representativeCluster; }
+        const std::unordered_set<const pandora::Cluster *> &GetClusters() const { return m_clusters; }
+        size_t size() const { return m_clusters.size(); }
+        auto begin() const { return m_clusters.begin(); }
+        auto end() const { return m_clusters.end(); }
+
+        std::unordered_set<const pandora::Cluster *> m_clusters;
+        const pandora::Cluster *m_representativeCluster;
+    };
+
 public:
     /**
      *  @brief Default constructor
