@@ -43,10 +43,11 @@ private:
     {
         ClusterGroup();
 
-        void Insert(const pandora::Cluster *pCluster);
+        void insert(const pandora::Cluster *pCluster);
         const pandora::Cluster *GetRepresentativeCluster() const { return m_representativeCluster; }
         const std::unordered_set<const pandora::Cluster *> &GetClusters() const { return m_clusters; }
         size_t size() const { return m_clusters.size(); }
+        bool empty() const { return m_clusters.empty(); }
         auto begin() const { return m_clusters.begin(); }
         auto end() const { return m_clusters.end(); }
 
@@ -126,21 +127,31 @@ private:
         const torch::Tensor &tensorSimMat, const pandora::ClusterList &clusterList, SimilarityMatrix &clusterSimMat) const;
 
     pandora::StatusCode ClusterFromSimilarity(
-        const SimilarityMatrix &clusterSimMat, std::vector<std::unordered_set<const pandora::Cluster *>> &clusterGroups) const;
+        const SimilarityMatrix &clusterSimMat, const float similarityThreshold, std::vector<ClusterGroup> &clusterGroups) const;
 
     pandora::StatusCode PopulateAdjacencyLists(
-        const SimilarityMatrix &simMat, AdjacencyLists &coreClusterAdjLists, AdjacencyLists &accClusterAdjLists) const;
+        const SimilarityMatrix &simMat,
+        const float similarityThreshold,
+        AdjacencyLists &coreClusterAdjLists,
+        AdjacencyLists &accClusterAdjLists) const;
 
-    pandora::StatusCode CalculateConnectedGroups(
-        const AdjacencyLists &clusterAdjLists, std::vector<std::unordered_set<const pandora::Cluster *>> &clusterGroups) const;
+    pandora::StatusCode CalculateConnectedGroups(const AdjacencyLists &clusterAdjLists, std::vector<ClusterGroup> &clusterGroups) const;
 
     pandora::StatusCode AddClustersToGroups(
         const SimilarityMatrix &clusterSimMat,
         AdjacencyLists &ungroupedClusterAdjLists,
-        std::vector<std::unordered_set<const pandora::Cluster *>> &clusterGroups) const;
+        const float similarityThreshold,
+        std::vector<ClusterGroup> &clusterGroups) const;
 
-    pandora::StatusCode MergeGroups(
-        const std::vector<std::unordered_set<const pandora::Cluster *>> &clusterGroups, const std::string &listNmae) const;
+    pandora::StatusCode PopulateSuperClusterSimilarityMatrix(
+        const std::vector<ClusterGroup> &clusterGroups, const SimilarityMatrix &clusterSimMat, SimilarityMatrix &superClusterSimMat) const;
+
+    pandora::StatusCode ExpandSuperClusterGroups(
+        const std::vector<ClusterGroup> &superClusterGroups,
+        const std::vector<ClusterGroup> &clusterGroups,
+        std::vector<ClusterGroup> &expandedSuperClusterGroups) const;
+
+    pandora::StatusCode MergeGroups(const std::vector<ClusterGroup> &clusterGroups, const std::string &listNmae) const;
 
     /* End inference methods */
 
@@ -172,7 +183,8 @@ private:
     pandora::StringVector m_clusterListNames;  ///< Names of cluster lists
     std::string m_vertexListName;              ///< Name of vertex list
     float m_similarityThreshold;               ///< Threshold value on similarity for clusters to be connected
-    unsigned int m_accessoryClustersMaxHits;            ///< Clusters with this number of less hits are treated as accessory clusters during merging
+    float m_similarityThresholdBeta;           ///< Scaling factor for second clustering pass
+    unsigned int m_accessoryClustersMaxHits;   ///< Clusters with this number of less hits are treated as accessory clusters during merging
 
     /* End configurable via xml members */
 };

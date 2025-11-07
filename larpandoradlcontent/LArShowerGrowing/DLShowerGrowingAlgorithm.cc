@@ -43,7 +43,7 @@ DLShowerGrowingAlgorithm::ClusterGroup::ClusterGroup() :
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
-void DLShowerGrowingAlgorithm::ClusterGroup::Insert(const Cluster* pCluster)
+void DLShowerGrowingAlgorithm::ClusterGroup::insert(const Cluster* pCluster)
 {
     if (m_clusters.empty())
     {
@@ -65,6 +65,7 @@ DLShowerGrowingAlgorithm::DLShowerGrowingAlgorithm() :
     m_trainingMode{false},
     m_trainingTreeName{""},
     m_similarityThreshold{0.5f},
+    m_similarityThresholdBeta{0.5f},
     m_accessoryClustersMaxHits{2}
 {
 }
@@ -435,12 +436,13 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
             this->PredictClusterSimilarityMatrix(clusterList, view, viewToVtxPos.at(view), clusterSimMat));
 
         // Use the predicted similarities to partition the clusters into super-clusters
-        std::vector<std::unordered_set<const Cluster *>> clusterGroups;
-        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->ClusterFromSimilarity(clusterSimMat, clusterGroups));
+        std::vector<ClusterGroup> clusterGroups;
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+            this->ClusterFromSimilarity(clusterSimMat, m_similarityThreshold, clusterGroups));
         { // Sanity check - ensure all clusters are in exactly one group. Could remove this, just makes me feel better.
             std::unordered_set<const Cluster *> uniqueGroupedClusters;
             size_t totalGroupedClusters{0};
-            for (const std::unordered_set<const Cluster *> &group : clusterGroups)
+            for (const ClusterGroup &group : clusterGroups)
             {
                 uniqueGroupedClusters.insert(group.begin(), group.end());
                 totalGroupedClusters += group.size();
@@ -448,13 +450,28 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
             PANDORA_RETURN_IF(STATUS_CODE_FAILURE,
                 totalGroupedClusters != clusterList.size() || uniqueGroupedClusters.size() != clusterList.size());
         }
+        std::cout << "Stage 1 clusterGroups: "; for (auto &g : clusterGroups) { int nHits{0}; for (auto c : g) { nHits += c->GetNCaloHits(); } std::cout << g.size() << " (" << nHits << "), "; } std::cout << "\n";
 
-        // Second pass agressive merging
+        // Get the similarities for the super-clusters, this is the minimum similarity of all constituent cluster pairs
+        SimilarityMatrix superClusterSimMat;
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+            this->PopulateSuperClusterSimilarityMatrix(clusterGroups, clusterSimMat, superClusterSimMat));
 
+        // Do the merges, the super-clusters are now just the clusters
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MergeGroups(clusterGroups, listName));
+        clusterGroups.clear();
+        clusterSimMat = superClusterSimMat;
 
+        if (m_similarityThresholdBeta > 1.f) // Nothing is going happen in this case
+        {
+            continue;
+        }
+        // Second stage of clustering, encourages merges for clusters that did not make many merges in the first stage
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+            this->ClusterFromSimilarity(clusterSimMat, m_similarityThreshold * m_similarityThresholdBeta, clusterGroups));
+        std::cout << "Stage 2 clusterGroups: "; for (auto &g : clusterGroups) { int nHits{0}; for (auto c : g) { nHits += c->GetNCaloHits(); } std::cout << g.size() << " (" << nHits << "), "; } std::cout << "\n\n";
 
-
-        // Make the merges
+        // Do the second round merges
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MergeGroups(clusterGroups, listName));
     }
 
@@ -573,17 +590,18 @@ StatusCode DLShowerGrowingAlgorithm::PopulateClusterSimilarityMatrix(
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode DLShowerGrowingAlgorithm::ClusterFromSimilarity(
-    const SimilarityMatrix &clusterSimMat, std::vector<std::unordered_set<const Cluster *>> &clusterGroups) const
+    const SimilarityMatrix &clusterSimMat, const float similarityThreshold, std::vector<ClusterGroup> &clusterGroups) const
 {
     AdjacencyLists coreClusterAdjLists, accClusterAdjLists;
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
-        this->PopulateAdjacencyLists(clusterSimMat, coreClusterAdjLists, accClusterAdjLists));
+        this->PopulateAdjacencyLists(clusterSimMat, similarityThreshold, coreClusterAdjLists, accClusterAdjLists));
 
     // Connected grouping of core clusters
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CalculateConnectedGroups(coreClusterAdjLists, clusterGroups));
 
     // Add accessory clusters into the core groups
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->AddClustersToGroups(clusterSimMat, accClusterAdjLists, clusterGroups));
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+        this->AddClustersToGroups(clusterSimMat, accClusterAdjLists, similarityThreshold, clusterGroups));
 
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CalculateConnectedGroups(accClusterAdjLists, clusterGroups));
 
@@ -593,7 +611,7 @@ StatusCode DLShowerGrowingAlgorithm::ClusterFromSimilarity(
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode DLShowerGrowingAlgorithm::PopulateAdjacencyLists(
-    const SimilarityMatrix &simMat, AdjacencyLists &coreAdjLists, AdjacencyLists &accAdjLists) const
+    const SimilarityMatrix &simMat, const float similarityThreshold, AdjacencyLists &coreAdjLists, AdjacencyLists &accAdjLists) const
 {
     PANDORA_RETURN_IF(STATUS_CODE_NOT_ALLOWED, !coreAdjLists.empty() || !accAdjLists.empty());
 
@@ -612,7 +630,7 @@ StatusCode DLShowerGrowingAlgorithm::PopulateAdjacencyLists(
 
         for (const auto &[pClusterJ, sim] : simRow)
         {
-            if (pClusterI == pClusterJ || sim <= m_similarityThreshold)
+            if (pClusterI == pClusterJ || sim <= similarityThreshold)
             {
                 continue;
             }
@@ -634,7 +652,7 @@ StatusCode DLShowerGrowingAlgorithm::PopulateAdjacencyLists(
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode DLShowerGrowingAlgorithm::CalculateConnectedGroups(
-    const AdjacencyLists &clusterAdjLists, std::vector<std::unordered_set<const Cluster *>> &clusterGroups) const
+    const AdjacencyLists &clusterAdjLists, std::vector<ClusterGroup> &clusterGroups) const
 {
     std::unordered_set<const Cluster *> visitedClusters;
     for (const auto &[pClusterRoot, _] : clusterAdjLists)
@@ -645,7 +663,7 @@ StatusCode DLShowerGrowingAlgorithm::CalculateConnectedGroups(
         }
 
         std::vector<const Cluster *> toSearch = { pClusterRoot };
-        std::unordered_set<const Cluster *> group;
+        ClusterGroup group;
         while (!toSearch.empty())
         {
             const Cluster *const pClusterI{toSearch.back()};
@@ -674,7 +692,8 @@ StatusCode DLShowerGrowingAlgorithm::CalculateConnectedGroups(
 StatusCode DLShowerGrowingAlgorithm::AddClustersToGroups(
     const SimilarityMatrix &clusterSimMat,
     AdjacencyLists &ungroupedClusterAdjLists,
-    std::vector<std::unordered_set<const Cluster *>> &clusterGroups) const
+    const float similarityThreshold,
+    std::vector<ClusterGroup> &clusterGroups) const
 {
     bool accMergeHappened{true};
     while (accMergeHappened)
@@ -692,7 +711,7 @@ StatusCode DLShowerGrowingAlgorithm::AddClustersToGroups(
                 for (const Cluster *const pClusterGrouped : *iter)
                 {
                     const float sim{clusterSimMat.at(pClusterUngrouped).at(pClusterGrouped)};
-                    if (sim > m_similarityThreshold && sim > bestSim)
+                    if (sim > similarityThreshold && sim > bestSim)
                     {
                         bestSim = sim;
                         bestGroup = i;
@@ -719,10 +738,65 @@ StatusCode DLShowerGrowingAlgorithm::AddClustersToGroups(
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
-StatusCode DLShowerGrowingAlgorithm::MergeGroups(
-    const std::vector<std::unordered_set<const Cluster *>> &clusterGroups, const std::string &listName) const
+StatusCode DLShowerGrowingAlgorithm::PopulateSuperClusterSimilarityMatrix(
+    const std::vector<ClusterGroup> &clusterGroups, const SimilarityMatrix &clusterSimMat, SimilarityMatrix &superClusterSimMat) const
 {
-    for (const std::unordered_set<const Cluster *> &clusterGroup : clusterGroups)
+    for (const ClusterGroup &clusterGroupI : clusterGroups)
+    {
+        const Cluster *const pClusterRepI{clusterGroupI.GetRepresentativeCluster()};
+        for (const ClusterGroup &clusterGroupJ : clusterGroups)
+        {
+            const Cluster *const pClusterRepJ{clusterGroupJ.GetRepresentativeCluster()};
+            if (pClusterRepI == pClusterRepJ)
+            {
+                superClusterSimMat[pClusterRepI][pClusterRepJ] = 1.f;
+                continue;
+            }
+            float minSim{1.f};
+            for (const Cluster *const pClusterI : clusterGroupI)
+            {
+                for (const Cluster *const pClusterJ : clusterGroupJ)
+                {
+                    minSim = std::min(minSim, clusterSimMat.at(pClusterI).at(pClusterJ));
+                }
+            }
+            superClusterSimMat[pClusterRepI][pClusterRepJ] = minSim;
+        }
+    }
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLShowerGrowingAlgorithm::ExpandSuperClusterGroups(
+    const std::vector<ClusterGroup> &superClusterGroups,
+    const std::vector<ClusterGroup> &clusterGroups,
+    std::vector<ClusterGroup> &expandedSuperClusterGroups) const
+{
+    for (const ClusterGroup &superClusterGroup : superClusterGroups)
+    {
+        ClusterGroup expandedSuperClusterGroup;
+        for (const Cluster *const pRepCluster : superClusterGroup)
+        {
+            auto iter{std::find_if(clusterGroups.begin(), clusterGroups.end(),
+                [&pRepCluster](const ClusterGroup &g){ return g.GetRepresentativeCluster() == pRepCluster; })};
+            for (const Cluster *const pCluster : *iter)
+            {
+                expandedSuperClusterGroup.insert(pCluster);
+            }
+        }
+        expandedSuperClusterGroups.emplace_back(std::move(expandedSuperClusterGroup));
+    }
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLShowerGrowingAlgorithm::MergeGroups(const std::vector<ClusterGroup> &clusterGroups, const std::string &listName) const
+{
+    for (const ClusterGroup &clusterGroup : clusterGroups)
     {
         if (clusterGroup.empty())
         {
@@ -730,9 +804,13 @@ StatusCode DLShowerGrowingAlgorithm::MergeGroups(
         }
 
         auto iter{clusterGroup.begin()};
-        const Cluster *const pClusterToEnlarge{*iter++};
+        const Cluster *const pClusterToEnlarge{clusterGroup.GetRepresentativeCluster()};
         for (; iter != clusterGroup.end(); ++iter)
         {
+            if (*iter == pClusterToEnlarge)
+            {
+                continue;
+            }
             PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
                 PandoraContentApi::MergeAndDeleteClusters(*this, pClusterToEnlarge, *iter, listName, listName));
         }
@@ -773,6 +851,9 @@ StatusCode DLShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "SimilarityThreshold", m_similarityThreshold));
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "SimilarityThresholdBeta", m_similarityThresholdBeta));
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "AccessoryClusterMaxHits", m_accessoryClustersMaxHits));
