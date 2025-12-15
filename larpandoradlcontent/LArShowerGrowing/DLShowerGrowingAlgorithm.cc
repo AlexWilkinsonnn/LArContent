@@ -61,11 +61,11 @@ DLShowerGrowingAlgorithm::DLShowerGrowingAlgorithm() :
     m_detectorXGaps{std::set<double>{}},
     m_deltaRayLengthThresholdSquared{std::map<HitType, float>{}},
     m_deltaRayParentWeightThreshold{0.f},
-    m_hitFeatureDim{12},
+    m_hitFeatureDim{14}, // m_hitFeatureDim{12},
     m_trainingMode{false},
     m_trainingTreeName{""},
     m_similarityThreshold{0.5f},
-    m_similarityThresholdBeta{0.5f},
+    m_similarityThresholdBeta{1.f},
     m_accessoryClustersMaxHits{2}
 {
 }
@@ -450,7 +450,13 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
             PANDORA_RETURN_IF(STATUS_CODE_FAILURE,
                 totalGroupedClusters != clusterList.size() || uniqueGroupedClusters.size() != clusterList.size());
         }
-        std::cout << "Stage 1 clusterGroups: "; for (auto &g : clusterGroups) { int nHits{0}; for (auto c : g) { nHits += c->GetNCaloHits(); } std::cout << g.size() << " (" << nHits << "), "; } std::cout << "\n";
+
+        if (m_similarityThresholdBeta >= 1.f) // Nothing is going happen in this case
+        {
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MergeGroups(clusterGroups, listName));
+            continue;
+        }
+        // std::cout << "Stage 1 clusterGroups: "; for (auto &g : clusterGroups) { int nHits{0}; for (auto c : g) { nHits += c->GetNCaloHits(); } std::cout << g.size() << " (" << nHits << "), "; } std::cout << "\n";
 
         // Get the similarities for the super-clusters, this is the minimum similarity of all constituent cluster pairs
         SimilarityMatrix superClusterSimMat;
@@ -462,14 +468,10 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
         clusterGroups.clear();
         clusterSimMat = superClusterSimMat;
 
-        if (m_similarityThresholdBeta > 1.f) // Nothing is going happen in this case
-        {
-            continue;
-        }
         // Second stage of clustering, encourages merges for clusters that did not make many merges in the first stage
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
             this->ClusterFromSimilarity(clusterSimMat, m_similarityThreshold * m_similarityThresholdBeta, clusterGroups));
-        std::cout << "Stage 2 clusterGroups: "; for (auto &g : clusterGroups) { int nHits{0}; for (auto c : g) { nHits += c->GetNCaloHits(); } std::cout << g.size() << " (" << nHits << "), "; } std::cout << "\n\n";
+        // std::cout << "Stage 2 clusterGroups: "; for (auto &g : clusterGroups) { int nHits{0}; for (auto c : g) { nHits += c->GetNCaloHits(); } std::cout << g.size() << " (" << nHits << "), "; } std::cout << "\n\n";
 
         // Do the second round merges
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MergeGroups(clusterGroups, listName));
@@ -502,7 +504,8 @@ StatusCode DLShowerGrowingAlgorithm::PredictClusterSimilarityMatrix(
         }
 
         torch::Tensor tensorCluster;
-        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MakeClusterTensor(clusterFeatures, view, tensorCluster));
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+            this->MakeClusterTensor(clusterFeatures, view, clusterList.size(), tensorCluster));
         torch::InferenceMode guard; torch::Tensor tensorEncodedCluster{m_modelEncoder.forward({tensorCluster}).toTensor()};
         tensorEncodedClusters.emplace_back(tensorEncodedCluster);
     }
@@ -523,7 +526,7 @@ StatusCode DLShowerGrowingAlgorithm::PredictClusterSimilarityMatrix(
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode DLShowerGrowingAlgorithm::MakeClusterTensor(
-    const std::vector<HitFeatures> &clusterFeatures, const HitType view, torch::Tensor &tensorCluster) const
+    const std::vector<HitFeatures> &clusterFeatures, const HitType view, const size_t nClusters, torch::Tensor &tensorCluster) const
 {
     const int nHits{static_cast<int>(clusterFeatures.size())};
 
@@ -557,6 +560,8 @@ StatusCode DLShowerGrowingAlgorithm::MakeClusterTensor(
         {
             accessor[0][i][11] = 1.f;
         }
+        accessor[0][i][12] = std::log(static_cast<float>(nHits));
+        accessor[0][i][13] = std::log(static_cast<float>(nClusters));
     }
 
     return STATUS_CODE_SUCCESS;

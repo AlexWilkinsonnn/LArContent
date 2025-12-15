@@ -121,7 +121,10 @@ private:
         SimilarityMatrix &clusterSimMat);
 
     pandora::StatusCode MakeClusterTensor(
-        const std::vector<HitFeatures> &clusterFeatures, const pandora::HitType view, torch::Tensor &tensorCluster) const;
+        const std::vector<HitFeatures> &clusterFeatures,
+        const pandora::HitType view,
+        const size_t nClusters,
+        torch::Tensor &tensorCluster) const;
 
     pandora::StatusCode PopulateClusterSimilarityMatrix(
         const torch::Tensor &tensorSimMat, const pandora::ClusterList &clusterList, SimilarityMatrix &clusterSimMat) const;
