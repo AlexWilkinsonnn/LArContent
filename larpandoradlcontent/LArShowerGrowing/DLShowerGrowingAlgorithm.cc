@@ -66,7 +66,8 @@ DLShowerGrowingAlgorithm::DLShowerGrowingAlgorithm() :
     m_trainingTreeName{""},
     m_similarityThreshold{0.5f},
     m_similarityThresholdBeta{1.f},
-    m_accessoryClustersMaxHits{2}
+    m_accessoryClustersMaxHits{2},
+    m_maxIterations{1}
 {
 }
 
@@ -112,9 +113,6 @@ StatusCode DLShowerGrowingAlgorithm::Run()
 
 StatusCode DLShowerGrowingAlgorithm::PrepareTrainingSample()
 {
-    // NOTE Other features:
-    // - hit distances to nearest X and Z gaps (XXX only the cathode gap seems to be in the 1x2x6 geometry?)
-
     const std::map<HitType, CartesianVector> viewToVtxPos{this->Get2DVertices()};
 
     const ClusterList clusterList{this->GetAllClusters()};
@@ -422,59 +420,67 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
 
     for (const std::string &listName : m_clusterListNames)
     {
-        ClusterList clusterList;
-        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetClusters(listName, clusterList));
-        if (clusterList.empty())
+        unsigned int nIterations{0};
+        while (nIterations++ < m_maxIterations)
         {
-            continue;
-        }
-        const HitType view{LArClusterHelper::GetClusterHitType(clusterList.front())};
-
-        // Use the trained model to predict pairwise cluster similarities
-        SimilarityMatrix clusterSimMat;
-        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
-            this->PredictClusterSimilarityMatrix(clusterList, view, viewToVtxPos.at(view), clusterSimMat));
-
-        // Use the predicted similarities to partition the clusters into super-clusters
-        std::vector<ClusterGroup> clusterGroups;
-        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
-            this->ClusterFromSimilarity(clusterSimMat, m_similarityThreshold, clusterGroups));
-        { // Sanity check - ensure all clusters are in exactly one group. Could remove this, just makes me feel better.
-            std::unordered_set<const Cluster *> uniqueGroupedClusters;
-            size_t totalGroupedClusters{0};
-            for (const ClusterGroup &group : clusterGroups)
+            ClusterList clusterList;
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetClusters(listName, clusterList));
+            if (clusterList.empty())
             {
-                uniqueGroupedClusters.insert(group.begin(), group.end());
-                totalGroupedClusters += group.size();
+                break;
             }
-            PANDORA_RETURN_IF(STATUS_CODE_FAILURE,
-                totalGroupedClusters != clusterList.size() || uniqueGroupedClusters.size() != clusterList.size());
-        }
+            const HitType view{LArClusterHelper::GetClusterHitType(clusterList.front())};
 
-        if (m_similarityThresholdBeta >= 1.f) // Nothing is going happen in this case
-        {
+            // Use the trained model to predict pairwise cluster similarities
+            SimilarityMatrix clusterSimMat;
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+                this->PredictClusterSimilarityMatrix(clusterList, view, viewToVtxPos.at(view), clusterSimMat));
+
+            // Use the predicted similarities to partition the clusters into super-clusters
+            std::vector<ClusterGroup> clusterGroups;
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+                this->ClusterFromSimilarity(clusterSimMat, m_similarityThreshold, clusterGroups));
+            PANDORA_RETURN_IF(STATUS_CODE_FAILURE, this->IsValidPartition(clusterGroups, clusterList)); // Sanity check
+
+            if (this->IsSingletonPartition(clusterGroups))
+            {
+                // std::cout << "Stopping at iteration: " << nIterations - 1 << "\n";
+                break;
+            }
+
+            if (m_similarityThresholdBeta >= 1.f) // Implies stage 2 is switched off
+            {
+                // Merge the Clusters according to their prior partition into super-clusters
+                PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MergeGroups(clusterGroups, listName));
+                // std::cout << "Iteration: " << nIterations - 1 << "\n";
+                // ClusterList mergedClusterList;
+                // PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetClusters(listName, mergedClusterList));
+                // PANDORA_MONITORING_API(VisualizeClusters(this->GetPandora(), &mergedClusterList, listName, AUTOITER, false));
+                // PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
+                continue;
+            }
+
+            // Optionally, the predicted similarities are reused here in a second stage of clustering that uses a reduced similarity
+            // threshold. The idea is to encourage merges for any clusters that underwent minimal/no merging in the first stage.
+
+            // Get the similarities for the super-clusters
+            // These similarities are the minimum predicted similarities for all pairs of the constituent clusters of the super-clusters
+            SimilarityMatrix superClusterSimMat;
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+                this->PopulateSuperClusterSimilarityMatrix(clusterGroups, clusterSimMat, superClusterSimMat));
+
+            // Do the first stage merges, the super-clusters are now just the clusters
             PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MergeGroups(clusterGroups, listName));
-            continue;
+            clusterGroups.clear();
+            clusterSimMat = superClusterSimMat;
+
+            // Second stage of clustering using the super-cluster similarity matrix
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+                this->ClusterFromSimilarity(clusterSimMat, m_similarityThreshold * m_similarityThresholdBeta, clusterGroups));
+
+            // Do the second stage merges
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MergeGroups(clusterGroups, listName));
         }
-        // std::cout << "Stage 1 clusterGroups: "; for (auto &g : clusterGroups) { int nHits{0}; for (auto c : g) { nHits += c->GetNCaloHits(); } std::cout << g.size() << " (" << nHits << "), "; } std::cout << "\n";
-
-        // Get the similarities for the super-clusters, this is the minimum similarity of all constituent cluster pairs
-        SimilarityMatrix superClusterSimMat;
-        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
-            this->PopulateSuperClusterSimilarityMatrix(clusterGroups, clusterSimMat, superClusterSimMat));
-
-        // Do the merges, the super-clusters are now just the clusters
-        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MergeGroups(clusterGroups, listName));
-        clusterGroups.clear();
-        clusterSimMat = superClusterSimMat;
-
-        // Second stage of clustering, encourages merges for clusters that did not make many merges in the first stage
-        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
-            this->ClusterFromSimilarity(clusterSimMat, m_similarityThreshold * m_similarityThresholdBeta, clusterGroups));
-        // std::cout << "Stage 2 clusterGroups: "; for (auto &g : clusterGroups) { int nHits{0}; for (auto c : g) { nHits += c->GetNCaloHits(); } std::cout << g.size() << " (" << nHits << "), "; } std::cout << "\n\n";
-
-        // Do the second round merges
-        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MergeGroups(clusterGroups, listName));
     }
 
     return STATUS_CODE_SUCCESS;
@@ -700,11 +706,10 @@ StatusCode DLShowerGrowingAlgorithm::AddClustersToGroups(
     const float similarityThreshold,
     std::vector<ClusterGroup> &clusterGroups) const
 {
-    bool accMergeHappened{true};
-    while (accMergeHappened)
+    std::map<const Cluster *const, int> plannedMerges;
+    do
     {
-        accMergeHappened = false;
-        std::map<const Cluster *const, int> plannedMerges;
+        plannedMerges.clear();
         for (const auto &[pClusterUngrouped, _] : ungroupedClusterAdjLists)
         {
             int bestGroup{-1};
@@ -727,7 +732,6 @@ StatusCode DLShowerGrowingAlgorithm::AddClustersToGroups(
             if (bestGroup >= 0)
             {
                 plannedMerges[pClusterUngrouped] = bestGroup;
-                accMergeHappened = true;
             }
         }
 
@@ -736,7 +740,7 @@ StatusCode DLShowerGrowingAlgorithm::AddClustersToGroups(
             clusterGroups[bestGroup].insert(pClusterUngrouped);
             ungroupedClusterAdjLists.erase(pClusterUngrouped);
         }
-    }
+    } while (!plannedMerges.empty());
 
     return STATUS_CODE_SUCCESS;
 }
@@ -774,31 +778,6 @@ StatusCode DLShowerGrowingAlgorithm::PopulateSuperClusterSimilarityMatrix(
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
-StatusCode DLShowerGrowingAlgorithm::ExpandSuperClusterGroups(
-    const std::vector<ClusterGroup> &superClusterGroups,
-    const std::vector<ClusterGroup> &clusterGroups,
-    std::vector<ClusterGroup> &expandedSuperClusterGroups) const
-{
-    for (const ClusterGroup &superClusterGroup : superClusterGroups)
-    {
-        ClusterGroup expandedSuperClusterGroup;
-        for (const Cluster *const pRepCluster : superClusterGroup)
-        {
-            auto iter{std::find_if(clusterGroups.begin(), clusterGroups.end(),
-                [&pRepCluster](const ClusterGroup &g){ return g.GetRepresentativeCluster() == pRepCluster; })};
-            for (const Cluster *const pCluster : *iter)
-            {
-                expandedSuperClusterGroup.insert(pCluster);
-            }
-        }
-        expandedSuperClusterGroups.emplace_back(std::move(expandedSuperClusterGroup));
-    }
-
-    return STATUS_CODE_SUCCESS;
-}
-
-//-----------------------------------------------------------------------------------------------------------------------------------------
-
 StatusCode DLShowerGrowingAlgorithm::MergeGroups(const std::vector<ClusterGroup> &clusterGroups, const std::string &listName) const
 {
     for (const ClusterGroup &clusterGroup : clusterGroups)
@@ -826,10 +805,38 @@ StatusCode DLShowerGrowingAlgorithm::MergeGroups(const std::vector<ClusterGroup>
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
+bool DLShowerGrowingAlgorithm::IsValidPartition(const std::vector<ClusterGroup> &clusterGroups, const ClusterList &clusterList) const
+{
+    std::unordered_set<const Cluster *> uniqueGroupedClusters;
+    size_t totalGroupedClusters{0};
+    for (const ClusterGroup &group : clusterGroups)
+    {
+        uniqueGroupedClusters.insert(group.begin(), group.end());
+        totalGroupedClusters += group.size();
+    }
+    return totalGroupedClusters == clusterList.size() && uniqueGroupedClusters.size() == clusterList.size();
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+bool DLShowerGrowingAlgorithm::IsSingletonPartition(const std::vector<ClusterGroup> &clusterGroups) const
+{
+    for (const ClusterGroup &group : clusterGroups)
+    {
+        if (group.size() > 1)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
 StatusCode DLShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
 {
-    PANDORA_RETURN_RESULT_IF_AND_IF(
-        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "TrainingMode", m_trainingMode));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "TrainingMode", m_trainingMode));
     if (m_trainingMode)
     {
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "TrainingTreeName", m_trainingTreeName));
@@ -849,19 +856,19 @@ StatusCode DLShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
         LArDLHelper::LoadModel(modelSimName, m_modelSim);
     }
 
-    PANDORA_RETURN_RESULT_IF_AND_IF(
-        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "ClusterListNames", m_clusterListNames));
-    PANDORA_RETURN_RESULT_IF_AND_IF(
-        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "VertexListName", m_vertexListName));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadVectorOfValues(xmlHandle, "ClusterListNames", m_clusterListNames));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "VertexListName", m_vertexListName));
 
-    PANDORA_RETURN_RESULT_IF_AND_IF(
-        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "SimilarityThreshold", m_similarityThreshold));
-    PANDORA_RETURN_RESULT_IF_AND_IF(
-        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+    PANDORA_RETURN_RESULT_IF_AND_IF( STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "SimilarityThreshold", m_similarityThreshold));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "SimilarityThresholdBeta", m_similarityThresholdBeta));
-    PANDORA_RETURN_RESULT_IF_AND_IF(
-        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "AccessoryClusterMaxHits", m_accessoryClustersMaxHits));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "MaxIterations", m_maxIterations));
 
     m_deltaRayLengthThresholdSquared = {
         { TPC_VIEW_U, static_cast<float>(pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_U), 2.)) },
