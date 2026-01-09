@@ -440,11 +440,10 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
             std::vector<ClusterGroup> clusterGroups;
             PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
                 this->ClusterFromSimilarity(clusterSimMat, m_similarityThreshold, clusterGroups));
-            PANDORA_RETURN_IF(STATUS_CODE_FAILURE, this->IsValidPartition(clusterGroups, clusterList)); // Sanity check
+            PANDORA_RETURN_IF(STATUS_CODE_FAILURE, this->IsInvalidPartition(clusterGroups, clusterList)); // Sanity check
 
             if (this->IsSingletonPartition(clusterGroups))
             {
-                // std::cout << "Stopping at iteration: " << nIterations - 1 << "\n";
                 break;
             }
 
@@ -452,11 +451,6 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
             {
                 // Merge the Clusters according to their prior partition into super-clusters
                 PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->MergeGroups(clusterGroups, listName));
-                // std::cout << "Iteration: " << nIterations - 1 << "\n";
-                // ClusterList mergedClusterList;
-                // PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetClusters(listName, mergedClusterList));
-                // PANDORA_MONITORING_API(VisualizeClusters(this->GetPandora(), &mergedClusterList, listName, AUTOITER, false));
-                // PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
                 continue;
             }
 
@@ -491,6 +485,8 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
 StatusCode DLShowerGrowingAlgorithm::PredictClusterSimilarityMatrix(
     const ClusterList &clusterList, const HitType view, const CartesianVector &vtxPos, SimilarityMatrix &clusterSimMat)
 {
+    torch::InferenceMode guard;
+
     std::vector<torch::Tensor> tensorEncodedClusters;
     for (const Cluster *const pCluster : clusterList)
     {
@@ -512,13 +508,13 @@ StatusCode DLShowerGrowingAlgorithm::PredictClusterSimilarityMatrix(
         torch::Tensor tensorCluster;
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
             this->MakeClusterTensor(clusterFeatures, view, clusterList.size(), tensorCluster));
-        torch::InferenceMode guard; torch::Tensor tensorEncodedCluster{m_modelEncoder.forward({tensorCluster}).toTensor()};
+        torch::Tensor tensorEncodedCluster{m_modelEncoder.forward({tensorCluster}).toTensor()};
         tensorEncodedClusters.emplace_back(tensorEncodedCluster);
     }
     torch::Tensor tensorEncodedEvent{torch::cat(tensorEncodedClusters, 1)};
     tensorEncodedClusters.clear(); // Free memory
 
-    torch::InferenceMode guard; torch::Tensor tensorAttnEvent{m_modelAttn.forward({tensorEncodedEvent}).toTensor()};
+    torch::Tensor tensorAttnEvent{m_modelAttn.forward({tensorEncodedEvent}).toTensor()};
     tensorEncodedEvent = torch::Tensor(); // Free memory
 
     torch::Tensor tensorSimMat{m_modelSim.forward({tensorAttnEvent}).toTensor()};
@@ -805,7 +801,7 @@ StatusCode DLShowerGrowingAlgorithm::MergeGroups(const std::vector<ClusterGroup>
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
-bool DLShowerGrowingAlgorithm::IsValidPartition(const std::vector<ClusterGroup> &clusterGroups, const ClusterList &clusterList) const
+bool DLShowerGrowingAlgorithm::IsInvalidPartition(const std::vector<ClusterGroup> &clusterGroups, const ClusterList &clusterList) const
 {
     std::unordered_set<const Cluster *> uniqueGroupedClusters;
     size_t totalGroupedClusters{0};
@@ -814,7 +810,7 @@ bool DLShowerGrowingAlgorithm::IsValidPartition(const std::vector<ClusterGroup> 
         uniqueGroupedClusters.insert(group.begin(), group.end());
         totalGroupedClusters += group.size();
     }
-    return totalGroupedClusters == clusterList.size() && uniqueGroupedClusters.size() == clusterList.size();
+    return totalGroupedClusters != clusterList.size() || uniqueGroupedClusters.size() != clusterList.size();
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------------

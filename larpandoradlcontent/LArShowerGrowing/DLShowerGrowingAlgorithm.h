@@ -288,14 +288,14 @@ private:
     pandora::StatusCode MergeGroups(const std::vector<ClusterGroup> &clusterGroups, const std::string &listNmae) const;
 
     /**
-     *  @brief Check if a cluster partition is disjoint and covers the set of clusters.
+     *  @brief Check if a cluster partition is invalid, valid being disjoint and covers the set of clusters.
      *
      *  @param[in] clusterGroups The cluster partition
      *  @param[in] clusterList   The list clusters
      *
-     *  @return Flag for if partition is valid
+     *  @return Flag for if partition is invalid
      */
-    bool IsValidPartition(const std::vector<ClusterGroup> &clusterGroups, const pandora::ClusterList  &clusterList) const;
+    bool IsInvalidPartition(const std::vector<ClusterGroup> &clusterGroups, const pandora::ClusterList  &clusterList) const;
 
     /**
      *  @brief Check if a cluster partition is all singletons.
@@ -336,7 +336,7 @@ private:
     pandora::StringVector m_clusterListNames;  ///< Names of cluster lists
     std::string m_vertexListName;              ///< Name of vertex list
     float m_similarityThreshold;               ///< Threshold value on similarity for clusters to be connected
-    float m_similarityThresholdBeta;           ///< Scaling factor for second clustering pass
+    float m_similarityThresholdBeta;           ///< Scaling factor for an optional second clustering pass
     unsigned int m_accessoryClustersMaxHits;   ///< Clusters with this number of less hits are treated as accessory clusters during merging
     unsigned int m_maxIterations;              ///< Max iterative applications of the cluster merging
 
