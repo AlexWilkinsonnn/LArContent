@@ -61,13 +61,15 @@ DLShowerGrowingAlgorithm::DLShowerGrowingAlgorithm() :
     m_detectorXGaps{std::set<double>{}},
     m_deltaRayLengthThresholdSquared{std::map<HitType, float>{}},
     m_deltaRayParentWeightThreshold{0.f},
-    m_hitFeatureDim{14}, // m_hitFeatureDim{12},
+    m_hitFeatureDim{12},
     m_trainingMode{false},
     m_trainingTreeName{""},
     m_similarityThreshold{0.5f},
     m_similarityThresholdBeta{1.f},
     m_accessoryClustersMaxHits{2},
-    m_maxIterations{1}
+    m_maxIterations{1},
+    m_includeHitCardinalityFeatures{true},
+    m_includeHitNIterationNumFeature{false}
 {
 }
 
@@ -434,7 +436,7 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
             // Use the trained model to predict pairwise cluster similarities
             SimilarityMatrix clusterSimMat;
             PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
-                this->PredictClusterSimilarityMatrix(clusterList, view, viewToVtxPos.at(view), clusterSimMat));
+                this->PredictClusterSimilarityMatrix(clusterList, view, viewToVtxPos.at(view), nIterations, clusterSimMat));
 
             // Use the predicted similarities to partition the clusters into super-clusters
             std::vector<ClusterGroup> clusterGroups;
@@ -483,7 +485,11 @@ StatusCode DLShowerGrowingAlgorithm::Infer()
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode DLShowerGrowingAlgorithm::PredictClusterSimilarityMatrix(
-    const ClusterList &clusterList, const HitType view, const CartesianVector &vtxPos, SimilarityMatrix &clusterSimMat)
+    const ClusterList &clusterList,
+    const HitType view,
+    const CartesianVector &vtxPos,
+    const unsigned int iterationNum,
+    SimilarityMatrix &clusterSimMat)
 {
     torch::InferenceMode guard;
 
@@ -507,7 +513,7 @@ StatusCode DLShowerGrowingAlgorithm::PredictClusterSimilarityMatrix(
 
         torch::Tensor tensorCluster;
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
-            this->MakeClusterTensor(clusterFeatures, view, clusterList.size(), tensorCluster));
+            this->MakeClusterTensor(clusterFeatures, view, clusterList.size(), iterationNum, tensorCluster));
         torch::Tensor tensorEncodedCluster{m_modelEncoder.forward({tensorCluster}).toTensor()};
         tensorEncodedClusters.emplace_back(tensorEncodedCluster);
     }
@@ -528,9 +534,18 @@ StatusCode DLShowerGrowingAlgorithm::PredictClusterSimilarityMatrix(
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode DLShowerGrowingAlgorithm::MakeClusterTensor(
-    const std::vector<HitFeatures> &clusterFeatures, const HitType view, const size_t nClusters, torch::Tensor &tensorCluster) const
+    const std::vector<HitFeatures> &clusterFeatures,
+    const HitType view,
+    const size_t nClusters,
+    const unsigned int iterationNum,
+    torch::Tensor &tensorCluster) const
 {
     const int nHits{static_cast<int>(clusterFeatures.size())};
+
+    const float nHitsFeat{std::log(static_cast<float>(nHits))};
+    const float nClustersFeat{std::log(static_cast<float>(nClusters))};
+    const float iterationNumFeat{std::log(static_cast<float>(iterationNum))};
+    const float zWidthFeat{LArGeometryHelper::GetWirePitch(this->GetPandora(), view) * m_cartesianZScaleFactor};
 
     tensorCluster = torch::zeros({1, nHits, m_hitFeatureDim});
     auto accessor = tensorCluster.accessor<float, 3>();
@@ -544,7 +559,7 @@ StatusCode DLShowerGrowingAlgorithm::MakeClusterTensor(
         accessor[0][i][3] = hitFeatures.m_xRel * m_cartesianXScaleFactor;
         accessor[0][i][4] = hitFeatures.m_zRel * m_cartesianZScaleFactor;
         accessor[0][i][5] = hitFeatures.m_xWidth * m_cartesianXScaleFactor;
-        accessor[0][i][6] = LArGeometryHelper::GetWirePitch(this->GetPandora(), view) * m_cartesianZScaleFactor;
+        accessor[0][i][6] = zWidthFeat;
         accessor[0][i][7] = hitFeatures.m_distToXGap * m_cartesianXScaleFactor;
         accessor[0][i][8] = std::log(hitFeatures.m_energy);
         accessor[0][i][9] = 0.f;
@@ -562,8 +577,15 @@ StatusCode DLShowerGrowingAlgorithm::MakeClusterTensor(
         {
             accessor[0][i][11] = 1.f;
         }
-        accessor[0][i][12] = std::log(static_cast<float>(nHits));
-        accessor[0][i][13] = std::log(static_cast<float>(nClusters));
+        if (m_includeHitCardinalityFeatures)
+        {
+            accessor[0][i][m_hitFeaturesNHitsIdx] = nHitsFeat;
+            accessor[0][i][m_hitFeaturesNClustersIdx] = nClustersFeat;
+        }
+        if (m_includeHitNIterationNumFeature)
+        {
+            accessor[0][i][m_hitFeaturesIterationNumIdx] = iterationNumFeat;
+        }
     }
 
     return STATUS_CODE_SUCCESS;
@@ -865,11 +887,24 @@ StatusCode DLShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
         XmlHelper::ReadValue(xmlHandle, "AccessoryClusterMaxHits", m_accessoryClustersMaxHits));
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "MaxIterations", m_maxIterations));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "IncludeHitCardinalityFeatures", m_includeHitCardinalityFeatures));
+    if (m_includeHitCardinalityFeatures)
+    {
+        m_hitFeaturesNHitsIdx = m_hitFeatureDim++;
+        m_hitFeaturesNClustersIdx = m_hitFeatureDim++;
+    }
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "IncludeHitNIterationNumFeature", m_includeHitNIterationNumFeature));
+    if (m_includeHitNIterationNumFeature)
+    {
+        m_hitFeaturesIterationNumIdx = m_hitFeatureDim++;
+    }
 
     m_deltaRayLengthThresholdSquared = {
-        { TPC_VIEW_U, static_cast<float>(pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_U), 2.)) },
-        { TPC_VIEW_V, static_cast<float>(pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_V), 2.)) },
-        { TPC_VIEW_W, static_cast<float>(pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_W), 2.)) }
+        { TPC_VIEW_U, static_cast<float>(std::pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_U), 2.)) },
+        { TPC_VIEW_V, static_cast<float>(std::pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_V), 2.)) },
+        { TPC_VIEW_W, static_cast<float>(std::pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_W), 2.)) }
     };
 
     const LArGeometryHelper::DetectorBoundaries detBounds{LArGeometryHelper::GetDetectorBoundaries(this->GetPandora())};

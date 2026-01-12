@@ -183,12 +183,14 @@ private:
      *  @param[in]  clusterList   The list of 2D clusters
      *  @param[in]  view          The view of the 2D clusters
      *  @param[in]  vtxPos        The 2D neutrino vertex of the view
+     *  @param[in]  iterationNum  The iteration of the inference (1 is the first)
      *  @param[out] clusterSimMat The similarity matrix encoding all predicted pairwise similarities of the input list of 2D clusters
      */
     pandora::StatusCode PredictClusterSimilarityMatrix(
         const pandora::ClusterList &clusterList,
         const pandora::HitType view,
         const pandora::CartesianVector &vtxPos,
+        const unsigned int iterationNum,
         SimilarityMatrix &clusterSimMat);
 
     /**
@@ -197,12 +199,14 @@ private:
      *  @param[in]  clusterFeatures Vector of hit properties for the hits of one 2D cluster
      *  @param[in]  view            The view of the 2D clusters
      *  @param[in]  nClusters       The total number of 2D clusters in the view
+     *  @param[in]  iterationNum    The iteration of the inference (1 is the first)
      *  @param[out] tensorCluster   The tensor encoding the cluster as a sequence of hit feature vectors
      */
     pandora::StatusCode MakeClusterTensor(
         const std::vector<HitFeatures> &clusterFeatures,
         const pandora::HitType view,
         const size_t nClusters,
+        const unsigned int iterationNum,
         torch::Tensor &tensorCluster) const;
 
     /**
@@ -317,6 +321,9 @@ private:
     float m_cartesianXScaleFactor;          ///< Scale factor for cartesian x coordinate input features
     float m_cartesianZScaleFactor;          ///< Scale factor for cartesian z coordinate input features
     std::set<double> m_detectorXGaps;       ///< X coordinates where gaps in X direction start/end
+    int m_hitFeaturesNHitsIdx;              ///< Hit feature vector index for the optional no. hits in cluster feature
+    int m_hitFeaturesNClustersIdx;          ///< Hit feature vector index for the optional no. clusters in event feature
+    int m_hitFeaturesIterationNumIdx;       ///< Hit feature vector index for the optional no. clusters in event feature
 
     /** End shared mutable members ***/
 
@@ -339,6 +346,8 @@ private:
     float m_similarityThresholdBeta;           ///< Scaling factor for an optional second clustering pass
     unsigned int m_accessoryClustersMaxHits;   ///< Clusters with this number of less hits are treated as accessory clusters during merging
     unsigned int m_maxIterations;              ///< Max iterative applications of the cluster merging
+    bool m_includeHitCardinalityFeatures;      ///< Option to include in hit feature vector the no. hits in cluster and no. clusters in event
+    bool m_includeHitNIterationNumFeature;     ///< Option to include in hit feature vector the inference iteration number
 
     /*** End configurable via xml members ***/
 };
