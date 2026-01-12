@@ -28,7 +28,8 @@ CrossGapsAssociationAlgorithm::CrossGapsAssociationAlgorithm() :
     m_maxOnClusterDistance(1.5f),
     m_minMatchedSamplingPoints(10),
     m_minMatchedSamplingFraction(0.5f),
-    m_gapTolerance(0.f)
+    m_gapTolerance(0.f),
+    m_visualize(false)
 {
 }
 
@@ -96,6 +97,7 @@ void CrossGapsAssociationAlgorithm::PopulateClusterAssociationMap(const ClusterV
 
             if (!this->AreClustersAssociated(fitIterI->second, fitIterJ->second))
                 continue;
+            std::cout << "CrossGapsAssoc found an association!\n";
 
             clusterAssociationMap[pInnerCluster].m_forwardAssociations.insert(pOuterCluster);
             clusterAssociationMap[pOuterCluster].m_backwardAssociations.insert(pInnerCluster);
@@ -143,12 +145,30 @@ bool CrossGapsAssociationAlgorithm::IsAssociated(
     const float sampleStepSizeAdjusted{ratio * m_sampleStepSize};
     unsigned int nMatchedSamplingPoints(0), nUnmatchedSampleRun(0);
 
+    bool shouldVisualise{false};
+    if (m_visualize)
+    {
+        for (unsigned int iSample = 0; iSample < m_maxSamplingPoints; ++iSample)
+        {
+            const CartesianVector samplingPoint(startPosition + startDirection * static_cast<float>(iSample) * sampleStepSizeAdjusted);
+
+            if (LArGeometryHelper::IsInGap(this->GetPandora(), samplingPoint, hitType, m_gapTolerance))
+            {
+                shouldVisualise = true;
+                break;
+            }
+        }
+    }
     for (unsigned int iSample = 0; iSample < m_maxSamplingPoints; ++iSample)
     {
         const CartesianVector samplingPoint(startPosition + startDirection * static_cast<float>(iSample) * sampleStepSizeAdjusted);
 
         if (LArGeometryHelper::IsInGap(this->GetPandora(), samplingPoint, hitType, m_gapTolerance))
         {
+            if (shouldVisualise)
+            {
+                PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &samplingPoint, "", BLUE, 1));
+            }
             nUnmatchedSampleRun = 0; // ATTN Choose to also reset run when entering gap region
             continue;
         }
@@ -157,13 +177,25 @@ bool CrossGapsAssociationAlgorithm::IsAssociated(
         {
             ++nMatchedSamplingPoints;
             nUnmatchedSampleRun = 0;
+            if (shouldVisualise)
+            {
+                PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &samplingPoint, "", GREEN, 1));
+            }
         }
         else if (++nUnmatchedSampleRun > m_maxUnmatchedSampleRun)
         {
             break;
         }
+        else if (shouldVisualise)
+        {
+            PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &samplingPoint, "", RED, 1));
+        }
     }
-
+    if (shouldVisualise)
+    {
+        PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
+    }
+        
     const float expectation(
         (targetFitResult.GetGlobalMaxLayerPosition() - targetFitResult.GetGlobalMinLayerPosition()).GetMagnitude() / sampleStepSizeAdjusted);
     const float matchedSamplingFraction(expectation > 0.f ? static_cast<float>(nMatchedSamplingPoints) / expectation : 0.f);
@@ -239,7 +271,9 @@ StatusCode CrossGapsAssociationAlgorithm::ReadSettings(const TiXmlHandle xmlHand
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "MinMatchedSamplingFraction", m_minMatchedSamplingFraction));
 
-    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "GapTolerance", m_gapTolerance));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "GapTolerance", m_gapTolerance))
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "Visualize", m_visualize));
 
     return ClusterAssociationAlgorithm::ReadSettings(xmlHandle);
 }

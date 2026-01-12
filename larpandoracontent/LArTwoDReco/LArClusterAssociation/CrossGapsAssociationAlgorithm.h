@@ -77,6 +77,7 @@ private:
     unsigned int m_minMatchedSamplingPoints; ///< Minimum number of matched sampling points to declare association
     float m_minMatchedSamplingFraction;      ///< Minimum ratio between matched sampling points and expectation to declare association
     float m_gapTolerance;                    ///< The tolerance to use when querying whether a sampling point is in a gap, units cm
+    bool m_visualize;
 };
 
 } // namespace lar_content
