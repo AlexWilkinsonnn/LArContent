@@ -65,6 +65,10 @@ private:
      */
     bool IsNearCluster(const pandora::CartesianVector &samplingPoint, const TwoDSlidingFitResult &targetFitResult) const;
 
+    void StoreSortedHits(const pandora::ClusterList *const pClusterList) const;
+
+    bool IsAssocBlocked(const TwoDSlidingFitResult &innerFitResult, const TwoDSlidingFitResult &outerFitResult) const;
+
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
 
     unsigned int m_minClusterHits;           ///< The minimum allowed number of hits in a clean cluster
@@ -77,6 +81,9 @@ private:
     unsigned int m_minMatchedSamplingPoints; ///< Minimum number of matched sampling points to declare association
     float m_minMatchedSamplingFraction;      ///< Minimum ratio between matched sampling points and expectation to declare association
     float m_gapTolerance;                    ///< The tolerance to use when querying whether a sampling point is in a gap, units cm
+    bool m_ignoreBlockedAssocs;
+
+    mutable pandora::OrderedCaloHitList m_orderedCaloHits;
 };
 
 } // namespace lar_content

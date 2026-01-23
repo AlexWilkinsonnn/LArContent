@@ -650,14 +650,13 @@ void LArClusterHelper::GetDaughterVolumeIDs(const Cluster *const pCluster, UIntS
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
-bool LArClusterHelper::HasBlockedPath(const CaloHitVector &caloHits, const CaloHit *const pCaloHit1, const CaloHit *const pCaloHit2)
+bool LArClusterHelper::HasBlockedPath(const CaloHitVector &caloHits, const CartesianVector &pos1, const CartesianVector &pos2,
+    const CaloHitSet &caloHitsToIgnore)
 {
-    // For each hit in the calo hit list, check if the line between the two hits passes through the hit
-    const CartesianVector &pos1{pCaloHit1->GetPositionVector()};
-    const CartesianVector &pos2{pCaloHit2->GetPositionVector()};
+    // For each hit in the calo hit list, check if the line between the two positions passes through the hit
     for (const CaloHit *const pCaloHit : caloHits)
     {
-        if (pCaloHit == pCaloHit1 || pCaloHit == pCaloHit2)
+        if (caloHitsToIgnore.find(pCaloHit) != caloHitsToIgnore.end())
             continue;
 
         const CartesianVector &hitPosition{pCaloHit->GetPositionVector()};
@@ -688,6 +687,13 @@ bool LArClusterHelper::HasBlockedPath(const CaloHitVector &caloHits, const CaloH
     }
 
     return false;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+bool LArClusterHelper::HasBlockedPath(const CaloHitVector &caloHits, const CaloHit *const pCaloHit1, const CaloHit *const pCaloHit2)
+{
+    return LArClusterHelper::HasBlockedPath(caloHits, pCaloHit1->GetPositionVector(), pCaloHit2->GetPositionVector(), { pCaloHit1, pCaloHit2 });
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------

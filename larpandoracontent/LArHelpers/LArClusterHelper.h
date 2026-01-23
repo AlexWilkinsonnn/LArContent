@@ -312,6 +312,18 @@ public:
      *  @return status code, faster than throwing in regular use-cases
      */
     static pandora::StatusCode GetAverageZ(const pandora::Cluster *const pCluster, const float xmin, const float xmax, float &averageZ);
+    /**
+     *  @brief  Determines if there is a hit between two positions.
+     *
+     *  @param  caloHits the collection of hits under consideration
+     *  @param  pos1 the first position
+     *  @param  pos2 the second position
+     *  @param  caloHitsToIgnore collection of hits to ignore
+     *
+     *  @return true if there is a hit between the two positions, false otherwise
+     */
+    static bool HasBlockedPath(const pandora::CaloHitVector &caloHits, const pandora::CartesianVector &pos1,
+        const pandora::CartesianVector &pos2, const pandora::CaloHitSet &caloHitsToIgnore);
 
     /**
      *  @brief  Determines if there is a hit between two hits.
