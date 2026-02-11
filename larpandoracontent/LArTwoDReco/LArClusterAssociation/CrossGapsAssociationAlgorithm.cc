@@ -147,6 +147,47 @@ bool CrossGapsAssociationAlgorithm::AreClustersAssociated(const TwoDSlidingFitRe
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
+bool CrossGapsAssociationAlgorithm::IsAssociated(
+    const CartesianVector &startPosition, const CartesianVector &startDirection, const TwoDSlidingFitResult &targetFitResult) const
+{
+    const HitType hitType(LArClusterHelper::GetClusterHitType(targetFitResult.GetCluster()));
+    const float ratio{LArGeometryHelper::GetWirePitchRatio(this->GetPandora(), hitType)};
+    const float sampleStepSizeAdjusted{ratio * m_sampleStepSize};
+    unsigned int nMatchedSamplingPoints(0), nUnmatchedSampleRun(0);
+
+    for (unsigned int iSample = 0; iSample < m_maxSamplingPoints; ++iSample)
+    {
+        const CartesianVector samplingPoint(startPosition + startDirection * static_cast<float>(iSample) * sampleStepSizeAdjusted);
+
+        if (LArGeometryHelper::IsInGap(this->GetPandora(), samplingPoint, hitType, m_gapTolerance))
+        {
+            nUnmatchedSampleRun = 0; // ATTN Choose to also reset run when entering gap region
+            continue;
+        }
+
+        if (this->IsNearCluster(samplingPoint, targetFitResult))
+        {
+            ++nMatchedSamplingPoints;
+            nUnmatchedSampleRun = 0;
+        }
+        else if (++nUnmatchedSampleRun > m_maxUnmatchedSampleRun)
+        {
+            break;
+        }
+    }
+
+    const float expectation(
+        (targetFitResult.GetGlobalMaxLayerPosition() - targetFitResult.GetGlobalMinLayerPosition()).GetMagnitude() / sampleStepSizeAdjusted);
+    const float matchedSamplingFraction(expectation > 0.f ? static_cast<float>(nMatchedSamplingPoints) / expectation : 0.f);
+
+    if ((nMatchedSamplingPoints > m_minMatchedSamplingPoints) || (matchedSamplingFraction > m_minMatchedSamplingFraction))
+        return true;
+
+    return false;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
 bool CrossGapsAssociationAlgorithm::IsNearCluster(const CartesianVector &samplingPoint, const TwoDSlidingFitResult &targetFitResult) const
 {
     const HitType hitType(LArClusterHelper::GetClusterHitType(targetFitResult.GetCluster()));
@@ -239,10 +280,12 @@ bool CrossGapsAssociationAlgorithm::IsAssocBlocked(const TwoDSlidingFitResult &i
         return false;
 
     CaloHitSet caloHitsToIgnore;
+
     const OrderedCaloHitList orderedCaloHitsInner{pClusterInner->GetOrderedCaloHitList()};
     CaloHitList *pCaloHitsToIgnoreInner;
     orderedCaloHitsInner.GetCaloHitsInPseudoLayer(minLayer, pCaloHitsToIgnoreInner);
     caloHitsToIgnore.insert(pCaloHitsToIgnoreInner->begin(), pCaloHitsToIgnoreInner->end());
+
     const OrderedCaloHitList orderedCaloHitsOuter{pClusterOuter->GetOrderedCaloHitList()};
     CaloHitList *pCaloHitsToIgnoreOuter;
     orderedCaloHitsOuter.GetCaloHitsInPseudoLayer(maxLayer, pCaloHitsToIgnoreOuter);
@@ -250,16 +293,16 @@ bool CrossGapsAssociationAlgorithm::IsAssocBlocked(const TwoDSlidingFitResult &i
 
     if (LArClusterHelper::HasBlockedPath(caloHits, pos1, pos2, caloHitsToIgnore))
     {
-        // std::cout << "Blocked path, refusing to merge\n";
-        // PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &pos1, "blocked -- inner", RED, 1));
-        // PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &pos2, "blocked -- outer", RED, 1));
-        // PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
+        std::cout << "Blocked path, refusing to merge\n";
+        PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &pos1, "blocked -- inner", RED, 1));
+        PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &pos2, "blocked -- outer", RED, 1));
+        PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
         return true;
     }
-    // std::cout << "Path no blocked, merging\n";
-    // PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &pos1, "merged -- inner", GREEN, 1));
-    // PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &pos2, "merged -- outer", GREEN, 1));
-    // PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
+    std::cout << "Path not blocked, merging\n";
+    PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &pos1, "merged -- inner", GREEN, 1));
+    PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &pos2, "merged -- outer", GREEN, 1));
+    PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
 
     return false;
 }
