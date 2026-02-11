@@ -137,6 +137,7 @@ private:
     float m_minMergeCosOpeningAngle; ///< The minimum cosine opening angle of the directions of associated clusters
     float m_minDirectionDeviationCosAngle; ///< The minimum cosine opening angle of the direction of and associated cluster before and after merge
     float m_minClusterSparseness;          ///< The threshold sparseness of a cluster to be considered in the merging process
+    bool m_onlyAdjacentClusters;     ///< Only allow associations between clusters that contain adjacent hits between the clusters
 
     // ATTN Dangling pointers emerge during cluster merging, here explicitly not dereferenced
     mutable LArHitWidthHelper::ClusterToParametersMap m_clusterToParametersMap; ///< The map [cluster -> cluster parameters]

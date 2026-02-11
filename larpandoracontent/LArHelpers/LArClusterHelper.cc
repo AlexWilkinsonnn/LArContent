@@ -362,6 +362,50 @@ void LArClusterHelper::GetClosestPositions(
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
+bool LArClusterHelper::AreClustersAdjacent(const pandora::Cluster *const pClusterI, const pandora::Cluster *const pClusterJ,
+    const float xTolerance)
+{
+    const Cluster *pClusterInner{pClusterI->GetInnerPseudoLayer() < pClusterJ->GetInnerPseudoLayer() ? pClusterI : pClusterJ};
+    const Cluster *pClusterOuter{pClusterI->GetInnerPseudoLayer() < pClusterJ->GetInnerPseudoLayer() ? pClusterJ : pClusterI};
+    const OrderedCaloHitList orderedCaloHitsInner{pClusterInner->GetOrderedCaloHitList()};
+    const OrderedCaloHitList orderedCaloHitsOuter{pClusterOuter->GetOrderedCaloHitList()};
+    const unsigned int minLayer{std::min(pClusterInner->GetInnerPseudoLayer() - 1, pClusterInner->GetInnerPseudoLayer())};
+    const unsigned int maxLayer{pClusterOuter->GetOuterPseudoLayer()};
+
+    for (OrderedCaloHitList::const_iterator iterInner = orderedCaloHitsInner.begin(); iterInner != orderedCaloHitsInner.end(); ++iterInner)
+    {
+        if (iterInner->first < minLayer)
+            continue;
+        
+        if (iterInner->first > maxLayer)
+            break;
+
+        CaloHitList *pCaloHitsInner{iterInner->second};
+
+        for (unsigned int layer = iterInner->first; layer <= iterInner->first + 1; ++layer)
+        {
+            OrderedCaloHitList::const_iterator iterOuter = orderedCaloHitsOuter.find(layer);
+            if (iterOuter == orderedCaloHitsOuter.end())
+                continue;
+            const CaloHitList *pCaloHitsOuter{iterOuter->second};
+
+            for (const CaloHit *const pCaloHitInner : *pCaloHitsInner)
+            {
+                for (const CaloHit *const pCaloHitOuter : *pCaloHitsOuter)
+                {
+                    const float xDist{std::abs((pCaloHitInner->GetPositionVector() - pCaloHitOuter->GetPositionVector()).GetX())};
+                    if (xDist < ((0.5f * pCaloHitInner->GetCellSize1() + 0.5f * pCaloHitOuter->GetCellSize1()) * (1.f + xTolerance)))
+                        return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
 void LArClusterHelper::GetClusterBoundingBox(const Cluster *const pCluster, CartesianVector &minimumCoordinate, CartesianVector &maximumCoordinate)
 {
     const OrderedCaloHitList &orderedCaloHitList(pCluster->GetOrderedCaloHitList());

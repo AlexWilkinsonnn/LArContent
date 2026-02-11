@@ -27,7 +27,8 @@ HitWidthClusterMergingAlgorithm::HitWidthClusterMergingAlgorithm() :
     m_maxZMergeDistance(2.f),
     m_minMergeCosOpeningAngle(0.97f),
     m_minDirectionDeviationCosAngle(0.9f),
-    m_minClusterSparseness(0.3f)
+    m_minClusterSparseness(0.3f),
+    m_onlyAdjacentClusters(false)
 {
 }
 
@@ -197,6 +198,41 @@ bool HitWidthClusterMergingAlgorithm::AreClustersAssociated(
     {
         return false;
     }
+
+    if (m_onlyAdjacentClusters &&
+        !LArClusterHelper::AreClustersAdjacent(currentFitParameters.GetClusterAddress(), testFitParameters.GetClusterAddress(), 0.1f))
+    {
+        std::cout << "HitWidth alg association blocked by adjacency check:\n";
+        const Cluster *const pClusterCurrent{currentFitParameters.GetClusterAddress()};
+        const CartesianVector &posCurrentInner{pClusterCurrent->GetCentroid(pClusterCurrent->GetInnerPseudoLayer())};
+        const CartesianVector &posCurrentOuter{pClusterCurrent->GetCentroid(pClusterCurrent->GetOuterPseudoLayer())};
+        PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &posCurrentInner, "A Inner BLOCKED", RED, 1));
+        PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &posCurrentOuter, "A Outer BLOCKED", RED, 1));
+        const Cluster *const pClusterTest{testFitParameters.GetClusterAddress()};
+        const CartesianVector &posTestInner{pClusterTest->GetCentroid(pClusterTest->GetInnerPseudoLayer())};
+        const CartesianVector &posTestOuter{pClusterTest->GetCentroid(pClusterTest->GetOuterPseudoLayer())};
+        PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &posTestInner, "B Inner BLOCKED", RED, 1));
+        PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &posTestOuter, "B Outer BLOCKED", RED, 1));
+        const ClusterList clusterList{pClusterCurrent, pClusterTest};
+        PANDORA_MONITORING_API(VisualizeClusters(this->GetPandora(), &clusterList, "clusters BLOCKED", AUTOITER));
+        PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
+        return false;
+    }
+
+    std::cout << "HitWidth alg found Associated clusters\n";
+    const Cluster *const pClusterCurrent{currentFitParameters.GetClusterAddress()};
+    const CartesianVector &posCurrentInner{pClusterCurrent->GetCentroid(pClusterCurrent->GetInnerPseudoLayer())};
+    const CartesianVector &posCurrentOuter{pClusterCurrent->GetCentroid(pClusterCurrent->GetOuterPseudoLayer())};
+    PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &posCurrentInner, "A Inner", BLUE, 1));
+    PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &posCurrentOuter, "A Outer", BLUE, 1));
+    const Cluster *const pClusterTest{testFitParameters.GetClusterAddress()};
+    const CartesianVector &posTestInner{pClusterTest->GetCentroid(pClusterTest->GetInnerPseudoLayer())};
+    const CartesianVector &posTestOuter{pClusterTest->GetCentroid(pClusterTest->GetOuterPseudoLayer())};
+    PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &posTestInner, "B Inner", BLUE, 1));
+    PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &posTestOuter, "B Outer", BLUE, 1));
+    const ClusterList clusterList{pClusterCurrent, pClusterTest};
+    PANDORA_MONITORING_API(VisualizeClusters(this->GetPandora(), &clusterList, "clusters", AUTOITER));
+    PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
 
     return true;
 }
@@ -475,6 +511,9 @@ StatusCode HitWidthClusterMergingAlgorithm::ReadSettings(const TiXmlHandle xmlHa
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "MinClusterSparseness", m_minClusterSparseness));
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "OnlyAdjacentClusters", m_onlyAdjacentClusters));
 
     return ClusterAssociationAlgorithm::ReadSettings(xmlHandle);
 }

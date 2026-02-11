@@ -225,6 +225,17 @@ public:
         pandora::CartesianVector &position1, pandora::CartesianVector &position2);
 
     /**
+     *  @brief  Determines, for a pair of clusters, if any pair of hits in the same or neighbouring layers has X overlap according to a defined tolerance
+     *
+     *  @param  pClusterI the address of the first cluster
+     *  @param  pClusterJ the address of the second cluster
+     *  @param  xTolerance extra tolerance for defining an X overlap, units of hit width for the pair of hits in question
+     *
+     *  @return true if the pair of clusters contains any adjacent hits
+     */
+    static bool AreClustersAdjacent(const pandora::Cluster *const pClusterI, const pandora::Cluster *const pClusterJ, const float xTolerance);
+
+    /**
      *  @brief  Get positions of the two most distant calo hits in a list of cluster (ordered by Z)
      *
      *  @param  clusterList the input cluster list
@@ -318,7 +329,7 @@ public:
      *  @param  caloHits the collection of hits under consideration
      *  @param  pos1 the first position
      *  @param  pos2 the second position
-     *  @param  caloHitsToIgnore collection of hits to ignore
+     *  @param  caloHitsToIgnore the collection of hits to ignore
      *
      *  @return true if there is a hit between the two positions, false otherwise
      */
