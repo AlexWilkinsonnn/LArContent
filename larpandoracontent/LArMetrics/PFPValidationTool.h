@@ -51,10 +51,23 @@ struct PFPTreeVars
     pandora::FloatVector m_completenessU;
     pandora::FloatVector m_completenessV;
     pandora::FloatVector m_completenessW;
+    pandora::FloatVector m_completenessADC;
+    pandora::FloatVector m_completenessADCU;
+    pandora::FloatVector m_completenessADCV;
+    pandora::FloatVector m_completenessADCW;
     pandora::FloatVector m_purity;
     pandora::FloatVector m_purityU;
     pandora::FloatVector m_purityV;
     pandora::FloatVector m_purityW;
+    pandora::FloatVector m_purityADC;
+    pandora::FloatVector m_purityADCU;
+    pandora::FloatVector m_purityADCV;
+    pandora::FloatVector m_purityADCW;
+    pandora::FloatVector m_altCompleteness;
+    pandora::FloatVector m_altPurity;
+    pandora::IntVector m_altPDG;
+    pandora::IntVector m_altIsUpstreamHierarchy;
+    pandora::IntVector m_altIsSameMC;
     pandora::FloatVector m_trueVertexX;
     pandora::FloatVector m_trueVertexY; 
     pandora::FloatVector m_trueVertexZ;
@@ -64,6 +77,9 @@ struct PFPTreeVars
     pandora::FloatVector m_trueDirX;
     pandora::FloatVector m_trueDirY; 
     pandora::FloatVector m_trueDirZ;
+    pandora::FloatVector m_trueEndDirX;
+    pandora::FloatVector m_trueEndDirY; 
+    pandora::FloatVector m_trueEndDirZ;
     pandora::FloatVector m_trueLength;
     pandora::FloatVector m_trueDisplacement;
     pandora::FloatVector m_recoVertexX;
@@ -87,6 +103,12 @@ struct PFPTreeVars
 
     void GetMatchingInfo(const LArHierarchyHelper::MCMatchesVector &mcMatchesVec,
         const pandora::MCParticle *const pMCTarget, const pandora::Pfo *const pBestMatch, PFPTreeVars &pfpTreeVars);
+
+    void GetAltMatchInfo(const LArHierarchyHelper::MCMatchesVector &mcMatchesVec, const pandora::MCParticleVector &targetMC,
+        const pandora::MCParticle *const pMCTarget, const pandora::Pfo *const pBestMatch, PFPTreeVars &pfpTreeVars);
+
+    void GetAltMetrics(const LArHierarchyHelper::MCHierarchy::Node *const pMCNode, const LArHierarchyHelper::RecoHierarchy::Node *const pRecoNode,
+        float &completeness, float &purity);
 
     void LengthValidation(const pandora::Algorithm *const pAlgorithm, const pandora::MCParticle *const pMCNu, 
         const pandora::MCParticle *const pTargetMC, const pandora::Pfo *const pBestMatch, PFPTreeVars &pfpTreeVars);

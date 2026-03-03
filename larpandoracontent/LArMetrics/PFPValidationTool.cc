@@ -9,6 +9,7 @@
 #include "Pandora/AlgorithmHeaders.h"
 
 #include "larpandoracontent/LArHelpers/LArPfoHelper.h"
+#include "larpandoracontent/LArHelpers/LArGeometryHelper.h"
 
 #include "larpandoracontent/LArMetrics/PFPValidationTool.h"
 
@@ -47,13 +48,140 @@ void PFPValidationTool::Run(const Algorithm *const pAlgorithm, const MCParticle 
         const MCParticle *const pMC(targetMC.at(i));
         const Pfo *const pBestMatch(bestRecoMatch.at(i));
 
+        // if (pBestMatch)
+        // {
+        //     // W view
+        //     CartesianVector endPos(pMC->GetEndpoint());
+        //     CartesianVector endPosW(LArGeometryHelper::ProjectPosition(this->GetPandora(), endPos, TPC_VIEW_W));
+        //     const LArMCParticle *const pLArMC(dynamic_cast<const LArMCParticle *>(pMC));
+        //     std::vector<float> x(pLArMC->GetX());
+        //     std::vector<float> y(pLArMC->GetY());
+        //     std::vector<float> z(pLArMC->GetZ());
+        //     CartesianVector endDir(pLArMC->GetEndDirection());
+        //     CartesianVector endSeed(endPos + (endDir * 20.f));
+        //     CartesianVector endSeedW(LArGeometryHelper::ProjectPosition(this->GetPandora(), endSeed, TPC_VIEW_W));
+        //     ClusterList clustersVis;
+        //     LArPfoHelper::GetClusters(pBestMatch, TPC_VIEW_W, clustersVis);
+        //     PandoraMonitoringApi::VisualizeClusters(this->GetPandora(), &clustersVis, "PFO", BLUE);
+        //     PandoraMonitoringApi::AddMarkerToVisualization(this->GetPandora(), &endPosW, "end position", RED, 2);
+        //     PandoraMonitoringApi::AddLineToVisualization(this->GetPandora(), &endPosW, &endSeedW, "end direction", RED, 2, 2);
+
+        //     for (unsigned int i = 0; i < x.size(); ++i)
+        //     {
+        //         CartesianVector position(x.at(i), y.at(i), z.at(i));
+        //         CartesianVector positionW(LArGeometryHelper::ProjectPosition(this->GetPandora(), position, TPC_VIEW_W));
+        //         PandoraMonitoringApi::AddMarkerToVisualization(this->GetPandora(), &positionW, "traj point", BLACK, 2);
+        //     }
+
+        //     PandoraMonitoringApi::ViewEvent(this->GetPandora());
+        // }
+
         this->GetMCParticleInfo(pMC, pfpTreeVars);
         this->GetMatchingInfo(mcMatchesVec, pMC, pBestMatch, pfpTreeVars);
         this->LengthValidation(pAlgorithm, pMCNu, pMC, pBestMatch, pfpTreeVars);
         this->PIDValidation(pAlgorithm, pMC, pBestMatch, pfpTreeVars);
+        this->GetAltMatchInfo(mcMatchesVec, targetMC, pMC, pBestMatch, pfpTreeVars);
     }
 
     this->FillTree(pfpTreeVars);
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+void PFPValidationTool::GetAltMatchInfo(const LArHierarchyHelper::MCMatchesVector &mcMatchesVec, const MCParticleVector &targetMC,
+    const MCParticle *const pMCTarget, const Pfo *const pBestMatch, PFPTreeVars &pfpTreeVars)
+{
+    // First find MCNode, sorry for looping over matches :( 
+    const LArHierarchyHelper::MCHierarchy::Node *pMCTargetNode(nullptr);
+    for (const LArHierarchyHelper::MCMatches &mcMatches : mcMatchesVec)
+    {
+        if (mcMatches.GetMC()->GetMCParticles().front() != pMCTarget)
+            continue;
+
+        pMCTargetNode = mcMatches.GetMC();
+        break;
+    }
+
+    if (!pMCTargetNode)
+        throw StatusCodeException(STATUS_CODE_FAILURE);
+
+    // Find the highest alternative completeness 
+    float altCompleteness(-1.f), altPurity(-1.f);
+    int altMCIndex(-1);
+
+    for (const LArHierarchyHelper::MCMatches &mcMatches : mcMatchesVec)
+    {
+        for (const LArHierarchyHelper::RecoHierarchy::Node *const pRecoNode : mcMatches.GetRecoMatches())
+        {
+            if (pBestMatch)
+            {
+                if (pBestMatch == pRecoNode->GetRecoParticles().front())
+                    continue;
+            }
+
+            float thisCompleteness(-1.f), thisPurity(-1.f);
+            this->GetAltMetrics(pMCTargetNode, pRecoNode, thisCompleteness, thisPurity);
+
+            if ((thisCompleteness > altCompleteness) && (thisCompleteness > std::numeric_limits<float>::epsilon()))
+            {
+                const MCParticle *const pThisMC(mcMatches.GetMC()->GetMCParticles().front());
+                const auto thisMCIter(std::find(targetMC.begin(), targetMC.end(), pThisMC));
+
+                if (thisMCIter == targetMC.end())
+                    continue;
+
+                const int thisMCIndex(thisMCIter - targetMC.begin());
+
+                altCompleteness = thisCompleteness;
+                altPurity = thisPurity;
+                altMCIndex = thisMCIndex;
+            }
+        }
+    }
+
+    // Tell us about the alt match
+    int isUpstreamHierarchy(-1);
+    int isSameMC(-1);
+    if (altMCIndex != -1)
+    {
+        // Is upstream hierarchy
+        const MCParticle *pSeed(pMCTarget);
+        while (pSeed->GetParentList().size() != 0)
+        {
+            if (pSeed->GetParentList().front() == targetMC.at(altMCIndex))
+            {
+                isUpstreamHierarchy = 1;
+            }
+            pSeed = pSeed->GetParentList().front();
+        }
+
+        if (isUpstreamHierarchy != 1)
+            isUpstreamHierarchy = 0;
+
+        // Is same MC
+        isSameMC = (targetMC.at(altMCIndex) == pMCTarget) ? 1 : 0;
+    }
+
+    pfpTreeVars.m_altCompleteness.push_back(altCompleteness);
+    pfpTreeVars.m_altPurity.push_back(altPurity);
+    pfpTreeVars.m_altPDG.push_back(altMCIndex == -1 ? -1 : targetMC.at(altMCIndex)->GetParticleId());
+    pfpTreeVars.m_altIsUpstreamHierarchy.push_back(isUpstreamHierarchy);
+    pfpTreeVars.m_altIsSameMC.push_back(isSameMC);
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+void PFPValidationTool::GetAltMetrics(const LArHierarchyHelper::MCHierarchy::Node *const pMCNode, const LArHierarchyHelper::RecoHierarchy::Node *const pRecoNode, 
+    float &completeness, float &purity)
+{
+    const CaloHitList &mcHits(pMCNode->GetCaloHits());
+    const CaloHitList &recoHits(pRecoNode->GetCaloHits());
+
+    CaloHitVector intersection;
+    std::set_intersection(mcHits.begin(), mcHits.end(), recoHits.begin(), recoHits.end(), std::back_inserter(intersection));
+
+    completeness = mcHits.size() == 0 ? -1.f : static_cast<float>(intersection.size()) / mcHits.size();
+    purity = recoHits.size() == 0 ? -1.f : static_cast<float>(intersection.size()) / recoHits.size();
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -91,6 +219,20 @@ void PFPValidationTool::GetMCParticleInfo(const MCParticle *const pMCTarget, PFP
         pfpTreeVars.m_trueDirY.push_back(trueDir.GetY());
         pfpTreeVars.m_trueDirZ.push_back(trueDir.GetZ());
     }
+
+    const CartesianVector trueEndDir(pLArMCParticle->GetEndDirection());
+    if (trueEndDir.GetMagnitudeSquared() < std::numeric_limits<float>::epsilon())
+    {
+        pfpTreeVars.m_trueEndDirX.push_back(-9999.f);
+        pfpTreeVars.m_trueEndDirY.push_back(-9999.f);
+        pfpTreeVars.m_trueEndDirZ.push_back(-9999.f);
+    }
+    else
+    {
+        pfpTreeVars.m_trueEndDirX.push_back(trueEndDir.GetX());
+        pfpTreeVars.m_trueEndDirY.push_back(trueEndDir.GetY());
+        pfpTreeVars.m_trueEndDirZ.push_back(trueEndDir.GetZ());
+    }
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -116,8 +258,12 @@ void PFPValidationTool::GetMatchingInfo(const LArHierarchyHelper::MCMatchesVecto
                 pfpTreeVars.m_nPfoHitsW);
             FloatVector &viewCompleteness(hitType == TPC_VIEW_U ? pfpTreeVars.m_completenessU : hitType == TPC_VIEW_V ? pfpTreeVars.m_completenessV : 
                 pfpTreeVars.m_completenessW);
+            FloatVector &viewCompletenessADC(hitType == TPC_VIEW_U ? pfpTreeVars.m_completenessADCU : hitType == TPC_VIEW_V ? pfpTreeVars.m_completenessADCV : 
+                pfpTreeVars.m_completenessADCW);
             FloatVector &viewPurity(hitType == TPC_VIEW_U ? pfpTreeVars.m_purityU : hitType == TPC_VIEW_V ? pfpTreeVars.m_purityV : 
                 pfpTreeVars.m_purityW);
+            FloatVector &viewPurityADC(hitType == TPC_VIEW_U ? pfpTreeVars.m_purityADCU : hitType == TPC_VIEW_V ? pfpTreeVars.m_purityADCV : 
+                pfpTreeVars.m_purityADCW);
 
             // Calculate!
             float totalEnergy(0.f);
@@ -132,14 +278,18 @@ void PFPValidationTool::GetMatchingInfo(const LArHierarchyHelper::MCMatchesVecto
                 LArPfoHelper::GetCaloHits(pBestMatch, hitType, viewPfoHits);
                 viewNPfoHits.push_back(viewPfoHits.size());
                 const LArHierarchyHelper::RecoHierarchy::Node *pRecoNode(mcMatches.GetRecoMatches().front());
-                viewCompleteness.push_back(mcMatches.GetCompleteness(pRecoNode, hitType));
-                viewPurity.push_back(mcMatches.GetPurity(pRecoNode, hitType));
+                viewCompleteness.push_back(mcMatches.GetCompleteness(pRecoNode, hitType, false));
+                viewCompletenessADC.push_back(mcMatches.GetCompleteness(pRecoNode, hitType, true));
+                viewPurity.push_back(mcMatches.GetPurity(pRecoNode, hitType, false));
+                viewPurityADC.push_back(mcMatches.GetPurity(pRecoNode, hitType, true));
             }
             else
             {
                 viewNPfoHits.push_back(0);
                 viewCompleteness.push_back(0);
+                viewCompletenessADC.push_back(0);
                 viewPurity.push_back(0);
+                viewPurityADC.push_back(0);
             }
         }
              
@@ -149,8 +299,10 @@ void PFPValidationTool::GetMatchingInfo(const LArHierarchyHelper::MCMatchesVecto
             pfpTreeVars.m_hasMatch.push_back(1);
             pfpTreeVars.m_nPfoHits2D.push_back(LArPfoHelper::GetNumberOfTwoDHits(pBestMatch));
             pfpTreeVars.m_nPfoHits3D.push_back(LArPfoHelper::GetNumberOfThreeDHits(pBestMatch));
-            pfpTreeVars.m_completeness.push_back(mcMatches.GetCompleteness(pRecoNode));
-            pfpTreeVars.m_purity.push_back(mcMatches.GetPurity(pRecoNode));
+            pfpTreeVars.m_completeness.push_back(mcMatches.GetCompleteness(pRecoNode, false));
+            pfpTreeVars.m_completenessADC.push_back(mcMatches.GetCompleteness(pRecoNode, true));
+            pfpTreeVars.m_purity.push_back(mcMatches.GetPurity(pRecoNode, false));
+            pfpTreeVars.m_purityADC.push_back(mcMatches.GetPurity(pRecoNode, true));
         }
         else
         {
@@ -158,7 +310,9 @@ void PFPValidationTool::GetMatchingInfo(const LArHierarchyHelper::MCMatchesVecto
             pfpTreeVars.m_nPfoHits2D.push_back(-1);
             pfpTreeVars.m_nPfoHits3D.push_back(-1);
             pfpTreeVars.m_completeness.push_back(0.f);
+            pfpTreeVars.m_completenessADC.push_back(0.f);
             pfpTreeVars.m_purity.push_back(0.f);
+            pfpTreeVars.m_purityADC.push_back(0.f);
         }
     }
 }
@@ -206,10 +360,10 @@ void PFPValidationTool::LengthValidation(const Algorithm *const pAlgorithm, cons
 
             // Signed vertexAcc
             const float vertexAcc((pRecoVertex->GetPosition() - trueVertex).GetMagnitude());
-            const float sign((vertexAcc < std::numeric_limits<float>::epsilon() || pMCTarget->GetEnergy() < std::numeric_limits<float>::epsilon()) ? 1.f : 
+            const float sign((vertexAcc < std::numeric_limits<float>::epsilon() || pMCTarget->GetMomentum().GetMagnitude() < std::numeric_limits<float>::epsilon()) ? 1.f : 
                              (pRecoVertex->GetPosition() - trueVertex).GetOpeningAngle(pMCTarget->GetMomentum()) < (M_PI * 0.5) ? 1.f : -1.f);
             pfpTreeVars.m_vertexAcc.push_back(vertexAcc * sign);
-            
+
             try
             {
                 pfpTreeVars.m_recoLength.push_back(std::sqrt(LArPfoHelper::GetThreeDLengthSquared(pBestMatch))); // TODO - better fit.
@@ -268,7 +422,6 @@ void PFPValidationTool::PIDValidation(const Algorithm *const pAlgorithm, const M
 
     pfpTreeVars.m_truePDG.push_back(truePDG);
 
-
     if (pBestMatch)
     {
         pfpTreeVars.m_isTrack.push_back(LArPfoHelper::IsTrack(pBestMatch));
@@ -306,10 +459,23 @@ void PFPValidationTool::FillTree(PFPTreeVars &pfpTreeVars)
     FloatVector &completenessU = pfpTreeVars.m_completenessU;
     FloatVector &completenessV = pfpTreeVars.m_completenessV;
     FloatVector &completenessW = pfpTreeVars.m_completenessW;
+    FloatVector &completenessADC = pfpTreeVars.m_completenessADC;
+    FloatVector &completenessADCU = pfpTreeVars.m_completenessADCU;
+    FloatVector &completenessADCV = pfpTreeVars.m_completenessADCV;
+    FloatVector &completenessADCW = pfpTreeVars.m_completenessADCW;
     FloatVector &purity = pfpTreeVars.m_purity;
     FloatVector &purityU = pfpTreeVars.m_purityU;
     FloatVector &purityV = pfpTreeVars.m_purityV;
     FloatVector &purityW = pfpTreeVars.m_purityW;
+    FloatVector &purityADC = pfpTreeVars.m_purityADC;
+    FloatVector &purityADCU = pfpTreeVars.m_purityADCU;
+    FloatVector &purityADCV = pfpTreeVars.m_purityADCV;
+    FloatVector &purityADCW = pfpTreeVars.m_purityADCW;
+    FloatVector &altCompleteness = pfpTreeVars.m_altCompleteness;
+    FloatVector &altPurity = pfpTreeVars.m_altPurity;
+    IntVector &altPDG = pfpTreeVars.m_altPDG;
+    IntVector &altIsUpstreamHierarchy = pfpTreeVars.m_altIsUpstreamHierarchy;
+    IntVector &altIsSameMC = pfpTreeVars.m_altIsSameMC;
     FloatVector &trueVertexX = pfpTreeVars.m_trueVertexX;
     FloatVector &trueVertexY = pfpTreeVars.m_trueVertexY; 
     FloatVector &trueVertexZ = pfpTreeVars.m_trueVertexZ;
@@ -319,6 +485,9 @@ void PFPValidationTool::FillTree(PFPTreeVars &pfpTreeVars)
     FloatVector &trueDirX = pfpTreeVars.m_trueDirX;
     FloatVector &trueDirY = pfpTreeVars.m_trueDirY; 
     FloatVector &trueDirZ = pfpTreeVars.m_trueDirZ;
+    FloatVector &trueEndDirX = pfpTreeVars.m_trueEndDirX;
+    FloatVector &trueEndDirY = pfpTreeVars.m_trueEndDirY; 
+    FloatVector &trueEndDirZ = pfpTreeVars.m_trueEndDirZ;
     FloatVector &trueLength = pfpTreeVars.m_trueLength;
     FloatVector &trueDisplacement = pfpTreeVars.m_trueDisplacement;
     FloatVector &recoVertexX = pfpTreeVars.m_recoVertexX;
@@ -353,10 +522,23 @@ void PFPValidationTool::FillTree(PFPTreeVars &pfpTreeVars)
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_CompletenessU", &completenessU));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_CompletenessV", &completenessV));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_CompletenessW", &completenessW));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_CompletenessADC", &completenessADC));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_CompletenessADCU", &completenessADCU));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_CompletenessADCV", &completenessADCV));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_CompletenessADCW", &completenessADCW));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_Purity", &purity));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_PurityU", &purityU));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_PurityV", &purityV));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_PurityW", &purityW));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_PurityADC", &purityADC));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_PurityADCU", &purityADCU));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_PurityADCV", &purityADCV));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_PurityADCW", &purityADCW));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "ALT_Completeness", &altCompleteness));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "ALT_Purity", &altPurity));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "ALT_PDG", &altPDG));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "ALT_IsUpstreamHierarchy", &altIsUpstreamHierarchy));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "ALT_IsSameMC", &altIsSameMC));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_VertexX", &trueVertexX));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_VertexY", &trueVertexY));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_VertexZ", &trueVertexZ));
@@ -366,6 +548,9 @@ void PFPValidationTool::FillTree(PFPTreeVars &pfpTreeVars)
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_DirX", &trueDirX));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_DirY", &trueDirY));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_DirZ", &trueDirZ));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_EndDirX", &trueEndDirX));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_EndDirY", &trueEndDirY));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_EndDirZ", &trueEndDirZ));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_Length", &trueLength));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "MCP_Displacement", &trueDisplacement));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "PFPTree", "BM_VertexX", &recoVertexX));

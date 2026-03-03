@@ -194,10 +194,12 @@ private:
     ShowerStartFinderTool *m_pShowerStartFinderTool;           ///< The shower start finder tool
     ProtoShowerMatchingTool *m_pProtoShowerMatchingTool;       ///< The 2D -> 3D ProtoShower matching tool
     std::string m_showerPfoListName;                           ///< The shower pfo list name
+    std::string m_trackPfoListName;
     std::string m_neutrinoVertexListName;                      ///< The neutrino vertex list name
     std::string m_caloHitListNameU;                            ///< The U calo hit list name
     std::string m_caloHitListNameV;                            ///< The V calo hit list name
     std::string m_caloHitListNameW;                            ///< The W calo hit list name
+    bool m_allOutcomes;
     unsigned int m_minShowerHits3D;                            ///< The min. number of hits of a significant shower
     unsigned int m_showerSlidingFitWindow;                     ///< The sliding fit window for shower fits
     float m_maxCoincidenceTransverseSeparation; ///< The max. transverse distance from the pathway direction of a coincident shower vertex

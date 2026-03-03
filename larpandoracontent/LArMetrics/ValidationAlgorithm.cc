@@ -26,8 +26,8 @@ ValidationAlgorithm::ValidationAlgorithm() :
     m_treeName("tree"),
     m_minPurity(0.5f),
     m_minCompleteness(0.1f),
-    m_minRecoHits(30),
-    m_minRecoHitsPerView(10),
+    m_minRecoHits(15),
+    m_minRecoHitsPerView(5),
     m_minRecoGoodViews(2),
     m_removeRecoNeutrons(true),
     m_selectRecoHits(false)
@@ -91,6 +91,9 @@ StatusCode ValidationAlgorithm::Run()
     nuParticlesVec.insert(nuParticlesVec.begin(), nuParticles.begin(), nuParticles.end());
     std::sort(nuParticlesVec.begin(), nuParticlesVec.end(), LArMCParticleHelper::SortByMomentum);
 
+    std::cout << "nuParticlesVec.size(): " << nuParticlesVec.size() << std::endl;
+
+
     // Input entry for each hierarchy
     for (unsigned int i = 0; i < nuParticlesVec.size(); ++i)
     {
@@ -112,7 +115,7 @@ StatusCode ValidationAlgorithm::Run()
             targetMC.push_back(pMCNode->GetMCParticles().front());
 
             // Determine best match pfo (if it exists)
-            if ((nMatches == 0) || (!mcMatches.IsQuality(quality)))
+            if (nMatches == 0) //|| (!mcMatches.IsQuality(quality)))
             {
                 bestRecoMatch.push_back(nullptr);
             }

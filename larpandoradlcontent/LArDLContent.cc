@@ -40,6 +40,7 @@
     d("LArDLHitValidation",              DlHitValidationAlgorithm)                                    \
     d("LArDLNeutrinoHierarchy",          DLNeutrinoHierarchyAlgorithm)                                \
     d("LArDLPfoCharacterisation",        DlPfoCharacterisationAlgorithm)                              \
+    d("LArDLTwoDShowerGrowing",          DLTwoDShowerGrowingAlgorithm)                                    \
     d("LArDLSecondaryVertexing",         DlSecondaryVertexingAlgorithm)                               \
     d("LArDLSNSignal",                   DlSNSignalAlgorithm)                                         \
     d("LArDLThreeDClusterSplitting",     DLThreeDClusterSplittingAlgorithm)                           \

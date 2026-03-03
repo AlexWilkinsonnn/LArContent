@@ -86,6 +86,7 @@ public:
     pandora::InputInt m_nuanceCode; ///< The nuance code
     pandora::InputInt m_process;    ///< The process creating the particle
     pandora::InputFloat m_visibleEnergy;
+    pandora::InputCartesianVector m_endDirection;
 };
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -131,10 +132,28 @@ public:
      */
     float GetVisibleEnergy() const;
 
+    /**
+     *  @brief  Get the end direction
+     *
+     *  @return the end direction
+     */
+    pandora::CartesianVector GetEndDirection() const;
+
+
+    /**
+     *  @brief  Get the x positions
+     *
+     *  @return the x positions
+     */
+    std::vector<float> GetX() const;
+    std::vector<float> GetY() const;
+    std::vector<float> GetZ() const;
+
 private:
     int m_nuanceCode; ///< The nuance code
     int m_process;    ///< The process that created the particle
     float m_visibleEnergy;
+    pandora::CartesianVector m_endDirection;
 };
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -194,7 +213,8 @@ inline LArMCParticle::LArMCParticle(const LArMCParticleParameters &parameters) :
     object_creation::MCParticle::Object(parameters),
     m_nuanceCode(parameters.m_nuanceCode.Get()),
     m_process(parameters.m_process.Get()),
-    m_visibleEnergy(parameters.m_visibleEnergy.Get())
+    m_visibleEnergy(parameters.m_visibleEnergy.Get()),
+    m_endDirection(parameters.m_endDirection.Get())
 {
 }
 
@@ -214,10 +234,18 @@ inline float LArMCParticle::GetVisibleEnergy() const
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
+inline pandora::CartesianVector LArMCParticle::GetEndDirection() const
+{
+    return m_endDirection;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
 inline void LArMCParticle::FillParameters(LArMCParticleParameters &parameters) const
 {
     parameters.m_nuanceCode = this->GetNuanceCode();
     parameters.m_visibleEnergy = this->GetVisibleEnergy();
+    parameters.m_endDirection = this->GetEndDirection();
     parameters.m_process = this->GetProcess();
     parameters.m_energy = this->GetEnergy();
     parameters.m_momentum = this->GetMomentum();

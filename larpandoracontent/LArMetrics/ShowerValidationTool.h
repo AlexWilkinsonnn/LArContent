@@ -30,9 +30,6 @@ struct ShowerTreeVars
     int m_run;
     int m_subrun;
     int m_event;
-    pandora::FloatVector m_trueShrDirX;
-    pandora::FloatVector m_trueShrDirY;
-    pandora::FloatVector m_trueShrDirZ;
     pandora::FloatVector m_coreTrueLengthFromU;
     pandora::FloatVector m_coreTrueLengthFromV;
     pandora::FloatVector m_coreTrueLengthFromW;
