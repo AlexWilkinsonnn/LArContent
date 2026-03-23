@@ -92,7 +92,7 @@ const MCParticle *DLMatchingAlgorithm::GetMainMC(const CaloHit *const pCaloHit) 
             pMainMC = pMC;
             maxWeight = weight;
         }
-        if (weight == maxWeight) // tie-breaker (very unlikely)
+        else if (weight == maxWeight) // tie-breaker (very unlikely)
         {
             if (LArMCParticleHelper::SortByMomentum(pMC, pMainMC))
             {
