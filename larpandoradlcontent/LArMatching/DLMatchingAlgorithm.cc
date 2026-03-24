@@ -22,7 +22,9 @@ DLMatchingAlgorithm::DLMatchingAlgorithm() :
     m_mcFoldTo{std::map<const MCParticle *const, const MCParticle *const>{}},
     m_deltaRayLengthThresholdSquared{std::map<HitType, float>{}},
     m_deltaRayParentWeightThreshold{0.f},
-    m_xOverlapMatchingLeeway{1.f}
+    m_xOverlapMatchingLeeway{1.f},
+    m_scoreThreshold{0.6f},
+    m_accessoryClustersMaxHits{2}
 {
 }
 
@@ -38,8 +40,38 @@ StatusCode DLMatchingAlgorithm::Run()
 {
     m_mcFoldTo.clear();
 
-    std::map<const Cluster *const, std::map<const Cluster *const, float>> clusterRelationshipMatrix;
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CalcTargetClusterRelationships(clusterRelationshipMatrix));
+    std::cout << "Doing intra-cluster merges...\n";
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->PerformIntraClusterMerges());
+    std::cout << "Done intra-cluster merges.\n";
+
+
+
+
+//     std::map<const HitType, ClusterRelationshipMatrix> clusterRelationshipSubMatrices;
+//     for (const auto &[pClusterI, row] : clusterRelationshipMatrix)
+//     {
+//         const HitType viewI{LArClusterHelper::GetClusterHitType(pClusterI)};
+//         for (const auto &[pClusterJ, score] : row)
+//         {
+//             if (LArClusterHelper::GetClusterHitType(pClusterJ) != viewI)
+//                 continue;
+//             clusterRelationshipSubMatrices[viewI][pClusterI][pClusterJ] = score; // maybe should assert symmetric?
+//         }
+//     }
+//     for (const auto &[view, clusterRelationshipSubMatrix] : clusterRelationshipSubMatrices)
+//     {
+//         AdjacencyLists coreClusterAdjLists, accClusterAdjLists;
+//         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+//             this->PopulateAdjacencyLists(clusterRelationshipSubMatrix, coreClusterAdjLists, accClusterAdjLists));
+
+//         std::vector<ClusterSet> clusterGroups;
+//         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CalculateConnectedGroups(coreClusterAdjLists, clusterGroups));
+
+//         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+//             this->AddClustersToGroups(clusterRelationshipSubMatrix, accClusterAdjLists, clusterGroups));
+
+//         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CalculateConnectedGroups(accClusterAdjLists, clusterGroups));
+//     }
 
     // Print the matrix
 
@@ -57,6 +89,61 @@ StatusCode DLMatchingAlgorithm::Run()
         
     // }
 
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLMatchingAlgorithm::PerformIntraClusterMerges() const
+{
+    int nIterations{0};
+    while (nIterations++ < 5)
+    {
+        std::cout << "Iter " << nIterations - 1 << " ==========\n";
+        ClusterRelationshipMatrix clusterRelationshipMatrix;
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CalcTargetClusterRelationships(clusterRelationshipMatrix));
+
+        std::map<const HitType, ClusterRelationshipMatrix> clusterRelationshipSubMatrices;
+        for (const auto &[pClusterI, scoreRow] : clusterRelationshipMatrix)
+        {
+            const HitType viewI{LArClusterHelper::GetClusterHitType(pClusterI)};
+            for (const auto &[pClusterJ, score] : scoreRow)
+            {
+                if (LArClusterHelper::GetClusterHitType(pClusterJ) != viewI)
+                    continue;
+                clusterRelationshipSubMatrices[viewI][pClusterI][pClusterJ] = score; // should check symmetry
+            }
+        }
+
+        bool didMerge{false};
+        for (const auto &[view, clusterRelationshipSubMatrix] : clusterRelationshipSubMatrices)
+        {
+            AdjacencyLists coreClusterAdjLists, accClusterAdjLists;
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+                this->PopulateAdjacencyLists(clusterRelationshipSubMatrix, coreClusterAdjLists, accClusterAdjLists));
+
+            std::vector<ClusterSet> clusterGroups;
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CalculateConnectedGroups(coreClusterAdjLists, clusterGroups));
+
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+                this->AddClustersToGroups(clusterRelationshipSubMatrix, accClusterAdjLists, clusterGroups));
+
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CalculateConnectedGroups(accClusterAdjLists, clusterGroups));
+
+            if (this->IsSingletonPartition(clusterGroups))
+                continue;
+
+            didMerge = true;
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+                this->MergeGroups(clusterGroups, view == TPC_VIEW_U ? m_inputClusterListNameU :
+                                                 view == TPC_VIEW_V ? m_inputClusterListNameV :
+                                                                      m_inputClusterListNameW));
+        }
+        std::cout << "=================\n";
+        if (!didMerge)
+            break;
+    }
 
     return STATUS_CODE_SUCCESS;
 }
@@ -118,18 +205,16 @@ const MCParticle *DLMatchingAlgorithm::FoldMCTo(const MCParticle *const pMC) con
         return pMC;
     }
 
-    const MCParticle *pCurrentMC{pMC};
     const MCParticle *pLeadingMC{pMC};
-    while (!pCurrentMC->IsRootParticle())
+    while (!pLeadingMC->IsRootParticle())
     {
-        const MCParticle *const pParentMC{*(pCurrentMC->GetParentList().begin())};
+        const MCParticle *const pParentMC{*(pLeadingMC->GetParentList().begin())};
         const int parentPdg{std::abs(pParentMC->GetParticleId())};
         if (parentPdg == PHOTON || parentPdg == E_MINUS)
         {
-            pCurrentMC = pParentMC;
+            pLeadingMC = pParentMC;
             continue;
         }
-        pLeadingMC = pCurrentMC;
         break;
     }
 
@@ -205,23 +290,22 @@ bool DLMatchingAlgorithm::CausesShower(const MCParticle *const pMC, int nDescend
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
-StatusCode DLMatchingAlgorithm::CalcTargetClusterRelationships(
-    std::map<const Cluster *const, std::map<const Cluster *const, float>> &clusterRelationshipMatrix) const
+StatusCode DLMatchingAlgorithm::CalcTargetClusterRelationships(ClusterRelationshipMatrix &clusterRelationshipMatrix) const
 {
     ClusterList clusterList;
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetClusters(clusterList));
 
     for (const Cluster *const pClusterI : clusterList)
     {
-        std::map<const MCParticle *const, int> mcCountsI;
-        std::map<const MCParticle *const, CaloHitList> mcCaloHitsI;
+        MCCountsMap mcCountsI;
+        MCCaloHitsMap mcCaloHitsI;
         int totalCountsI{0};
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetClusterMCSummary(pClusterI, mcCountsI, totalCountsI, mcCaloHitsI));
 
         for (const Cluster *const pClusterJ : clusterList)
         {
-            std::map<const MCParticle *const, int> mcCountsJ;
-            std::map<const MCParticle *const, CaloHitList> mcCaloHitsJ;
+            MCCountsMap mcCountsJ;
+            MCCaloHitsMap mcCaloHitsJ;
             int totalCountsJ{0};
             PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetClusterMCSummary(pClusterJ, mcCountsJ, totalCountsJ, mcCaloHitsJ));
 
@@ -301,9 +385,7 @@ StatusCode DLMatchingAlgorithm::GetClusters(ClusterList &clusterList) const
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode DLMatchingAlgorithm::GetClusterMCSummary(
-    const Cluster *const pCluster,
-    std::map<const MCParticle *const, int> &mcCounts, int &totalCounts,
-    std::map<const MCParticle *const, CaloHitList> &mcCaloHits) const
+    const Cluster *const pCluster, MCCountsMap &mcCounts, int &totalCounts, MCCaloHitsMap &mcCaloHits) const
 {
     CaloHitList caloHitList;
     LArClusterHelper::GetAllHits(pCluster, caloHitList);
@@ -324,8 +406,7 @@ StatusCode DLMatchingAlgorithm::GetClusterMCSummary(
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 float DLMatchingAlgorithm::CalcIntraViewClusterRelationship(
-    const std::map<const MCParticle *const, int> &mcCountsI, const int totalCountsI,
-    const std::map<const MCParticle *const, int> &mcCountsJ, const int totalCountsJ) const
+    const MCCountsMap &mcCountsI, const int totalCountsI, const MCCountsMap &mcCountsJ, const int totalCountsJ) const
 {
     float sim{0.f};
     if (totalCountsI == 0 || totalCountsJ == 0)
@@ -343,8 +424,7 @@ float DLMatchingAlgorithm::CalcIntraViewClusterRelationship(
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 float DLMatchingAlgorithm::CalcInterViewClusterRelationship(
-    const std::map<const MCParticle *const, CaloHitList> &mcCaloHitsI, const int totalCountsI,
-    const std::map<const MCParticle *const, CaloHitList> &mcCaloHitsJ) const
+    const MCCaloHitsMap &mcCaloHitsI, const int totalCountsI, const MCCaloHitsMap &mcCaloHitsJ) const
 {
     if (totalCountsI == 0)
         return 0.f;
@@ -368,7 +448,6 @@ int DLMatchingAlgorithm::CalcMaxXOverlapHitMatches(const CaloHitList &caloHitsI,
     const int nCaloHitsI{static_cast<int>(caloHitsI.size())};
     const int nCaloHitsJ{static_cast<int>(caloHitsJ.size())};
 
-    // Build adjacency list
     std::vector<std::vector<int>> adjIToJ(nCaloHitsI);
     int idxI{0};
     for (const CaloHit *const pCaloHitI : caloHitsI)
@@ -390,7 +469,6 @@ int DLMatchingAlgorithm::CalcMaxXOverlapHitMatches(const CaloHitList &caloHitsI,
         ++idxI;
     }
 
-    // Hungarian-style augmenting paths
     std::vector<int> matchesJ(nCaloHitsJ, -1);
     int nMatches{0};
     for (idxI = 0; idxI < nCaloHitsI; ++idxI)
@@ -425,6 +503,163 @@ bool DLMatchingAlgorithm::FindAugmentingPath(
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
+StatusCode DLMatchingAlgorithm::PopulateAdjacencyLists(
+    const ClusterRelationshipMatrix &relMat, AdjacencyLists &coreAdjLists, AdjacencyLists &accAdjLists) const
+{
+    PANDORA_RETURN_IF(STATUS_CODE_NOT_ALLOWED, !coreAdjLists.empty() || !accAdjLists.empty());
+
+    for (const auto &[pClusterI, scoreRow] : relMat)
+    {
+        const bool iIsCore{pClusterI->GetNCaloHits() > m_accessoryClustersMaxHits};
+        // I rely on all clusters appearing in an adjList, this ensures singletons appear
+        if (iIsCore && coreAdjLists.find(pClusterI) == coreAdjLists.end())
+        {
+            coreAdjLists[pClusterI] = {};
+        }
+        else if (!iIsCore && accAdjLists.find(pClusterI) == accAdjLists.end())
+        {
+            accAdjLists[pClusterI] = {};
+        }
+
+        for (const auto &[pClusterJ, score] : scoreRow)
+        {
+            if (pClusterI == pClusterJ || score <= m_scoreThreshold)
+                continue;
+
+            const bool jIsCore{pClusterJ->GetNCaloHits() > m_accessoryClustersMaxHits};
+            if (iIsCore && jIsCore)
+            {
+                coreAdjLists.at(pClusterI).emplace_back(pClusterJ);
+            }
+            else if (!iIsCore && !jIsCore)
+            {
+                accAdjLists.at(pClusterI).emplace_back(pClusterJ);
+            }
+        }
+    }
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLMatchingAlgorithm::CalculateConnectedGroups(
+    const AdjacencyLists &clusterAdjLists, std::vector<ClusterSet> &clusterGroups) const
+{
+    ClusterSet visitedClusters;
+    for (const auto &[pClusterRoot, _] : clusterAdjLists)
+    {
+        if (visitedClusters.find(pClusterRoot) != visitedClusters.end())
+            continue;
+
+        std::vector<const Cluster *> toSearch = {pClusterRoot};
+        ClusterSet group;
+        while (!toSearch.empty())
+        {
+            const Cluster *const pClusterI{toSearch.back()};
+            toSearch.pop_back();
+            group.insert(pClusterI);
+            visitedClusters.insert(pClusterI);
+
+            for (const Cluster *const pClusterJ : clusterAdjLists.at(pClusterI))
+            {
+                if (visitedClusters.find(pClusterJ) != visitedClusters.end())
+                    continue;
+
+                toSearch.push_back(pClusterJ);
+            }
+        }
+
+        clusterGroups.emplace_back(group);
+    }
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLMatchingAlgorithm::AddClustersToGroups(
+    const ClusterRelationshipMatrix &clusterRelMat, AdjacencyLists &ungroupedClusterAdjLists, std::vector<ClusterSet> &clusterGroups) const
+{
+    std::map<const Cluster *const, int> plannedMerges;
+    do
+    {
+        plannedMerges.clear();
+        for (const auto &[pClusterUngrouped, _] : ungroupedClusterAdjLists)
+        {
+            int bestGroup{-1};
+            float bestScore{std::numeric_limits<float>::lowest()};
+
+            auto iter{clusterGroups.begin()};
+            for (int i = 0; i < static_cast<int>(clusterGroups.size()); i++, iter++)
+            {
+                for (const Cluster *const pClusterGrouped : *iter)
+                {
+                    const float score{clusterRelMat.at(pClusterUngrouped).at(pClusterGrouped)};
+                    if (score > m_scoreThreshold && score > bestScore)
+                    {
+                        bestScore = score;
+                        bestGroup = i;
+                    }
+                }
+            }
+
+            if (bestGroup >= 0)
+            {
+                plannedMerges[pClusterUngrouped] = bestGroup;
+            }
+        }
+
+        for (const auto &[pClusterUngrouped, bestGroup] : plannedMerges)
+        {
+            clusterGroups[bestGroup].insert(pClusterUngrouped);
+            ungroupedClusterAdjLists.erase(pClusterUngrouped);
+        }
+    } while (!plannedMerges.empty());
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+bool DLMatchingAlgorithm::IsSingletonPartition(const std::vector<ClusterSet> &clusterGroups) const
+{
+    for (const ClusterSet &group : clusterGroups)
+    {
+        if (group.size() > 1)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLMatchingAlgorithm::MergeGroups(const std::vector<ClusterSet> &clusterGroups, const std::string &listName) const
+{
+    for (const ClusterSet &clusterGroup : clusterGroups)
+    {
+        if (clusterGroup.empty())
+            continue;
+
+        auto iter{clusterGroup.begin()};
+        const Cluster *const pClusterToEnlarge{*iter};
+        for (; iter != clusterGroup.end(); ++iter)
+        {
+            if (*iter == pClusterToEnlarge)
+                continue;
+
+            PANDORA_RETURN_RESULT_IF(
+                STATUS_CODE_SUCCESS, !=, PandoraContentApi::MergeAndDeleteClusters(*this, pClusterToEnlarge, *iter, listName, listName));
+        }
+    }
+
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
 StatusCode DLMatchingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
 {
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "InputClusterListNameU", m_inputClusterListNameU));
@@ -433,6 +668,10 @@ StatusCode DLMatchingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
 
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "XOverlapMatchingLeeway", m_xOverlapMatchingLeeway));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "ScoreThreshold", m_scoreThreshold));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "AccessoryClusterMaxHits", m_accessoryClustersMaxHits));
 
     m_deltaRayLengthThresholdSquared = {
         {TPC_VIEW_U, static_cast<float>(std::pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_U), 2.))},

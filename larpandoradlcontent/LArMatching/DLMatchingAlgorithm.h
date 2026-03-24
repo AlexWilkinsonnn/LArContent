@@ -32,6 +32,11 @@ public:
     virtual ~DLMatchingAlgorithm();
 
 private:
+    typedef std::map<const pandora::Cluster *const, std::map<const pandora::Cluster *const, float>> ClusterRelationshipMatrix;
+    typedef std::map<const pandora::MCParticle *const, int> MCCountsMap;
+    typedef std::map<const pandora::MCParticle *const, pandora::CaloHitList> MCCaloHitsMap;
+    typedef std::map<const pandora::Cluster *const, std::vector<const pandora::Cluster *>> AdjacencyLists;
+
     pandora::StatusCode Run();
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
 
@@ -43,32 +48,44 @@ private:
 
     const pandora::MCParticle *FoldPotentialDeltaRayTo(const pandora::CaloHit *const pCaloHit, const pandora::MCParticle *const pMC) const;
 
-    pandora::StatusCode CalcTargetClusterRelationships(
-        std::map<const pandora::Cluster *const, std::map<const pandora::Cluster *const, float>> &clusterRelationshipMatrix) const;
+    pandora::StatusCode PerformIntraClusterMerges() const;
+
+    pandora::StatusCode CalcTargetClusterRelationships(ClusterRelationshipMatrix &clusterRelationshipMatrix) const;
 
     pandora::StatusCode GetClusters(pandora::ClusterList &clusterList) const;
 
     float CalcIntraViewClusterRelationship(
-        const std::map<const pandora::MCParticle *const, int> &mcCountsI, const int totalCountsI, 
-        const std::map<const pandora::MCParticle *const, int> &mcCountsJ, const int totalCountsJ) const;
+        const MCCountsMap &mcCountsI, const int totalCountsI, const MCCountsMap &mcCountsJ, const int totalCountsJ) const;
 
     float CalcInterViewClusterRelationship(
-        const std::map<const pandora::MCParticle *const, pandora::CaloHitList> &mcCaloHitsI, const int totalCountsI,
-        const std::map<const pandora::MCParticle *const, pandora::CaloHitList> &mcCaloHitsJ) const;
+        const MCCaloHitsMap &mcCaloHitsI, const int totalCountsI, const MCCaloHitsMap &mcCaloHitsJ) const;
 
     pandora::StatusCode GetClusterMCSummary(
-        const pandora::Cluster *const pCluster,
-        std::map<const pandora::MCParticle *const, int> &mcCounts, int &totalCounts,
-        std::map<const pandora::MCParticle *const, pandora::CaloHitList> &mcCaloHits) const;
+        const pandora::Cluster *const pCluster, MCCountsMap &mcCounts, int &totalCounts, MCCaloHitsMap &mcCaloHits) const;
 
     int CalcMaxXOverlapHitMatches(const pandora::CaloHitList &caloHitsI, const pandora::CaloHitList &caloHitsJ) const;
 
     bool FindAugmentingPath(
         const int idxI, const std::vector<std::vector<int>> &adjIToJ, std::vector<int> &matchesJ, std::vector<bool> &visitedJ) const;
 
+    pandora::StatusCode PopulateAdjacencyLists(
+        const ClusterRelationshipMatrix &relMat, AdjacencyLists &coreClusterAdjLists, AdjacencyLists &accClusterAdjLists) const;
+
+    pandora::StatusCode CalculateConnectedGroups(
+        const AdjacencyLists &clusterAdjLists, std::vector<pandora::ClusterSet> &clusterGroups) const;
+
+    pandora::StatusCode AddClustersToGroups(
+        const ClusterRelationshipMatrix &clusterRelMat,
+        AdjacencyLists &ungroupedClusterAdjLists,
+        std::vector<pandora::ClusterSet> &clusterGroups) const;
+
+    bool IsSingletonPartition(const std::vector<pandora::ClusterSet> &clusterGroups) const;
+
+    pandora::StatusCode MergeGroups(const std::vector<pandora::ClusterSet> &clusterGroups, const std::string &listNmae) const;
+
     /* Start shared mutable members */
 
-    mutable std::map<const pandora::MCParticle *const, const pandora::MCParticle *const> m_mcFoldTo;
+    mutable std::map<const pandora::MCParticle *const, const pandora::MCParticle *const> m_mcFoldTo; // caching
 
     /* End shared mutable members */
 
@@ -85,6 +102,8 @@ private:
     std::string m_inputClusterListNameV;
     std::string m_inputClusterListNameW;
     float m_xOverlapMatchingLeeway;
+    float m_scoreThreshold;
+    unsigned int m_accessoryClustersMaxHits;
 
     /* End configurable via xml members */
 };
