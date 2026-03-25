@@ -277,11 +277,19 @@ void PFPValidationTool::GetMatchingInfo(const LArHierarchyHelper::MCMatchesVecto
                 CaloHitList viewPfoHits;
                 LArPfoHelper::GetCaloHits(pBestMatch, hitType, viewPfoHits);
                 viewNPfoHits.push_back(viewPfoHits.size());
-                const LArHierarchyHelper::RecoHierarchy::Node *pRecoNode(mcMatches.GetRecoMatches().front());
-                viewCompleteness.push_back(mcMatches.GetCompleteness(pRecoNode, hitType, false));
-                viewCompletenessADC.push_back(mcMatches.GetCompleteness(pRecoNode, hitType, true));
-                viewPurity.push_back(mcMatches.GetPurity(pRecoNode, hitType, false));
-                viewPurityADC.push_back(mcMatches.GetPurity(pRecoNode, hitType, true));
+
+                // Find the best match
+                const LArHierarchyHelper::RecoHierarchy::Node *pRecoMatchNode(nullptr);
+                for (const auto pRecoNode : mcMatches.GetRecoMatches())
+                {
+                    if (pRecoNode->GetRecoParticles().front() == pBestMatch)
+                        pRecoMatchNode = pRecoNode;
+                }
+
+                viewCompleteness.push_back(mcMatches.GetCompleteness(pRecoMatchNode, hitType, false));
+                viewCompletenessADC.push_back(mcMatches.GetCompleteness(pRecoMatchNode, hitType, true));
+                viewPurity.push_back(mcMatches.GetPurity(pRecoMatchNode, hitType, false));
+                viewPurityADC.push_back(mcMatches.GetPurity(pRecoMatchNode, hitType, true));
             }
             else
             {
@@ -295,14 +303,22 @@ void PFPValidationTool::GetMatchingInfo(const LArHierarchyHelper::MCMatchesVecto
              
         if (pBestMatch)
         {
-            const LArHierarchyHelper::RecoHierarchy::Node *pRecoNode(mcMatches.GetRecoMatches().front());
             pfpTreeVars.m_hasMatch.push_back(1);
             pfpTreeVars.m_nPfoHits2D.push_back(LArPfoHelper::GetNumberOfTwoDHits(pBestMatch));
             pfpTreeVars.m_nPfoHits3D.push_back(LArPfoHelper::GetNumberOfThreeDHits(pBestMatch));
-            pfpTreeVars.m_completeness.push_back(mcMatches.GetCompleteness(pRecoNode, false));
-            pfpTreeVars.m_completenessADC.push_back(mcMatches.GetCompleteness(pRecoNode, true));
-            pfpTreeVars.m_purity.push_back(mcMatches.GetPurity(pRecoNode, false));
-            pfpTreeVars.m_purityADC.push_back(mcMatches.GetPurity(pRecoNode, true));
+
+            // Find the best match
+            const LArHierarchyHelper::RecoHierarchy::Node *pRecoMatchNode(nullptr);
+            for (const auto pRecoNode : mcMatches.GetRecoMatches())
+            {
+                if (pRecoNode->GetRecoParticles().front() == pBestMatch)
+                    pRecoMatchNode = pRecoNode;
+            }
+
+            pfpTreeVars.m_completeness.push_back(mcMatches.GetCompleteness(pRecoMatchNode, false));
+            pfpTreeVars.m_completenessADC.push_back(mcMatches.GetCompleteness(pRecoMatchNode, true));
+            pfpTreeVars.m_purity.push_back(mcMatches.GetPurity(pRecoMatchNode, false));
+            pfpTreeVars.m_purityADC.push_back(mcMatches.GetPurity(pRecoMatchNode, true));
         }
         else
         {

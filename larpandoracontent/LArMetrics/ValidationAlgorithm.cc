@@ -91,9 +91,6 @@ StatusCode ValidationAlgorithm::Run()
     nuParticlesVec.insert(nuParticlesVec.begin(), nuParticles.begin(), nuParticles.end());
     std::sort(nuParticlesVec.begin(), nuParticlesVec.end(), LArMCParticleHelper::SortByMomentum);
 
-    std::cout << "nuParticlesVec.size(): " << nuParticlesVec.size() << std::endl;
-
-
     // Input entry for each hierarchy
     for (unsigned int i = 0; i < nuParticlesVec.size(); ++i)
     {
@@ -121,7 +118,19 @@ StatusCode ValidationAlgorithm::Run()
             }
             else
             {
-                bestRecoMatch.push_back(mcMatches.GetRecoMatches().front()->GetRecoParticles().front());
+                // Find the best match
+                const ParticleFlowObject *pBestMatch(nullptr);
+                float bestCompleteness(0.0);
+                for (const auto pRecoNode : mcMatches.GetRecoMatches())
+                {
+                    const float thisCompleteness(mcMatches.GetCompleteness(pRecoNode, false));
+                    if (thisCompleteness > bestCompleteness)
+                    {
+                        bestCompleteness = thisCompleteness;
+                        pBestMatch = pRecoNode->GetRecoParticles().front();
+                    }
+                }
+                bestRecoMatch.push_back(pBestMatch);
             }
         }
 
