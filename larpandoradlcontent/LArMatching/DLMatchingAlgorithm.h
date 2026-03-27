@@ -11,6 +11,8 @@
 #include "Pandora/Algorithm.h"
 #include "Pandora/AlgorithmHeaders.h"
 
+#include "larpandoracontent/LArUtility/RollUp.h"
+
 namespace lar_dl_content
 {
 /**
@@ -39,14 +41,6 @@ private:
 
     pandora::StatusCode Run();
     pandora::StatusCode ReadSettings(const pandora::TiXmlHandle xmlHandle);
-
-    const pandora::MCParticle *GetMainMC(const pandora::CaloHit *const pCaloHit) const;
-
-    const pandora::MCParticle *FoldMCTo(const pandora::MCParticle *const pMC) const;
-
-    bool CausesShower(const pandora::MCParticle *const pMC, int nDescendentElectrons) const;
-
-    const pandora::MCParticle *FoldPotentialDeltaRayTo(const pandora::CaloHit *const pCaloHit, const pandora::MCParticle *const pMC) const;
 
     pandora::StatusCode PerformIntraClusterMerges() const;
 
@@ -85,14 +79,11 @@ private:
 
     /* Start shared mutable members */
 
-    mutable std::map<const pandora::MCParticle *const, const pandora::MCParticle *const> m_mcFoldTo; // caching
+    lar_content::RollUpper m_rollUpper;
 
     /* End shared mutable members */
 
     /* Start hardcoded members */
-
-    std::map<pandora::HitType, float> m_deltaRayLengthThresholdSquared;
-    float m_deltaRayParentWeightThreshold;
 
     /* End hardcoded members */
 

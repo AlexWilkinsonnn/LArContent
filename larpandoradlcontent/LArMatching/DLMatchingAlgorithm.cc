@@ -19,9 +19,6 @@ namespace lar_dl_content
 {
 
 DLMatchingAlgorithm::DLMatchingAlgorithm() :
-    m_mcFoldTo{std::map<const MCParticle *const, const MCParticle *const>{}},
-    m_deltaRayLengthThresholdSquared{std::map<HitType, float>{}},
-    m_deltaRayParentWeightThreshold{0.f},
     m_xOverlapMatchingLeeway{1.f},
     m_scoreThreshold{0.6f},
     m_accessoryClustersMaxHits{2}
@@ -38,7 +35,7 @@ DLMatchingAlgorithm::~DLMatchingAlgorithm()
 
 StatusCode DLMatchingAlgorithm::Run()
 {
-    m_mcFoldTo.clear();
+    m_rollUpper.Reset();
 
     std::cout << "Doing intra-cluster merges...\n";
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->PerformIntraClusterMerges());
@@ -150,146 +147,6 @@ StatusCode DLMatchingAlgorithm::PerformIntraClusterMerges() const
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
-const MCParticle *DLMatchingAlgorithm::GetMainMC(const CaloHit *const pCaloHit) const
-{
-    MCParticleWeightMap weightMap{pCaloHit->GetMCParticleWeightMap()};
-    MCParticleWeightMap foldedWeightMap;
-    for (const auto &[pMC, weight] : weightMap)
-    {
-        const MCParticle *pFoldedMC{nullptr};
-        if (m_mcFoldTo.find(pMC) != m_mcFoldTo.end())
-        {
-            pFoldedMC = m_mcFoldTo.at(pMC);
-        }
-        else
-        {
-            pFoldedMC = this->FoldMCTo(pMC);
-            m_mcFoldTo.insert({pMC, pFoldedMC});
-        }
-        foldedWeightMap[pFoldedMC] += weight;
-    }
-    weightMap = std::move(foldedWeightMap);
-
-    const MCParticle *pMainMC{nullptr};
-    float maxWeight{0.f};
-    for (const auto &[pMC, weight] : weightMap)
-    {
-        if (weight > maxWeight)
-        {
-            pMainMC = pMC;
-            maxWeight = weight;
-        }
-        else if (weight == maxWeight) // tie-breaker (very unlikely)
-        {
-            if (LArMCParticleHelper::SortByMomentum(pMC, pMainMC))
-            {
-                pMainMC = pMC;
-            }
-        }
-    }
-
-    if (pMainMC)
-    {
-        pMainMC = this->FoldPotentialDeltaRayTo(pCaloHit, pMainMC);
-    }
-
-    return pMainMC;
-}
-
-//-----------------------------------------------------------------------------------------------------------------------------------------
-
-const MCParticle *DLMatchingAlgorithm::FoldMCTo(const MCParticle *const pMC) const
-{
-    if (!LArMCParticleHelper::IsEM(pMC))
-    {
-        return pMC;
-    }
-
-    const MCParticle *pLeadingMC{pMC};
-    while (!pLeadingMC->IsRootParticle())
-    {
-        const MCParticle *const pParentMC{*(pLeadingMC->GetParentList().begin())};
-        const int parentPdg{std::abs(pParentMC->GetParticleId())};
-        if (parentPdg == PHOTON || parentPdg == E_MINUS)
-        {
-            pLeadingMC = pParentMC;
-            continue;
-        }
-        break;
-    }
-
-    return pLeadingMC;
-}
-
-//------------------------------------------------------------------------------------------------------------------------------------------
-
-const MCParticle *DLMatchingAlgorithm::FoldPotentialDeltaRayTo(const CaloHit *const pCaloHit, const MCParticle *const pMC) const
-{
-    // Not an electron -> not a delta ray -> do nothing
-    if (pMC->IsRootParticle() || pMC->GetParticleId() != E_MINUS)
-    {
-        return pMC;
-    }
-
-    // Did not come from a track-like particle -> not a delta ray -> do nothing
-    const MCParticle *const pParentMC{*(pMC->GetParentList().begin())};
-    const int parentPdg{std::abs(pParentMC->GetParticleId())};
-    if (parentPdg == PHOTON || parentPdg == E_MINUS || PdgTable::GetParticleCharge(parentPdg) == 0)
-    {
-        return pMC;
-    }
-
-    // Delta ray that does not start a shower and is short -> fold into parent particle
-    if (!this->CausesShower(pMC, 0) &&
-        (pMC->GetVertex() - pMC->GetEndpoint()).GetMagnitudeSquared() < m_deltaRayLengthThresholdSquared.at(pCaloHit->GetHitType()))
-    {
-        return pParentMC;
-    }
-
-    // Now have a delta ray that we would like to cluster but only the hits that are not overlapping with the parent particle
-    float parentWeight{std::numeric_limits<float>::lowest()};
-    const MCParticleWeightMap &weightMap{pCaloHit->GetMCParticleWeightMap()};
-    for (const auto &[pContributingMC, weight] : weightMap)
-    {
-        if (pContributingMC == pParentMC)
-        {
-            parentWeight = weight;
-            break;
-        }
-    }
-    if (parentWeight > m_deltaRayParentWeightThreshold)
-    {
-        return pParentMC;
-    }
-    return pMC;
-}
-
-//-----------------------------------------------------------------------------------------------------------------------------------------
-
-bool DLMatchingAlgorithm::CausesShower(const MCParticle *const pMC, int nDescendentElectrons) const
-{
-    if (nDescendentElectrons > 1)
-    {
-        return true;
-    }
-
-    if (std::abs(pMC->GetParticleId()) == E_MINUS)
-    {
-        nDescendentElectrons++; // Including the parent particle, ie. the first in the recursion, as a descendent
-    }
-    for (const MCParticle *pChildMC : pMC->GetDaughterList())
-    {
-        if (this->CausesShower(pChildMC, nDescendentElectrons))
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-//-----------------------------------------------------------------------------------------------------------------------------------------
-
 StatusCode DLMatchingAlgorithm::CalcTargetClusterRelationships(ClusterRelationshipMatrix &clusterRelationshipMatrix) const
 {
     ClusterList clusterList;
@@ -391,7 +248,7 @@ StatusCode DLMatchingAlgorithm::GetClusterMCSummary(
     LArClusterHelper::GetAllHits(pCluster, caloHitList);
     for (const CaloHit *const pCaloHit : caloHitList)
     {
-        const MCParticle *const pMC{this->GetMainMC(pCaloHit)};
+        const MCParticle *const pMC{m_rollUpper.RollUpCaloHit(pCaloHit)};
         if (pMC)
         {
             ++mcCounts[pMC];
@@ -673,10 +530,11 @@ StatusCode DLMatchingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
         XmlHelper::ReadValue(xmlHandle, "AccessoryClusterMaxHits", m_accessoryClustersMaxHits));
 
-    m_deltaRayLengthThresholdSquared = {
-        {TPC_VIEW_U, static_cast<float>(std::pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_U), 2.))},
-        {TPC_VIEW_V, static_cast<float>(std::pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_V), 2.))},
-        {TPC_VIEW_W, static_cast<float>(std::pow(LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_W), 2.))}};
+    const std::map<HitType, float> lengthThresholds{
+        { TPC_VIEW_U, LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_U) },
+        { TPC_VIEW_V, LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_V) },
+        { TPC_VIEW_W, LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_W) }};
+    m_rollUpper = RollUpper(std::make_unique<RollUpEMAndAmbiguousDeltaRayHitsPolicy>(0.f, lengthThresholds));
 
     return STATUS_CODE_SUCCESS;
 }
