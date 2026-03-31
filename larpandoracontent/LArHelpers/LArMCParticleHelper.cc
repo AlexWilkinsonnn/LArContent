@@ -21,6 +21,8 @@
 #include "larpandoracontent/LArHelpers/LArPfoHelper.h"
 #include "larpandoracontent/LArHelpers/LArGeometryHelper.h"
 
+#include "larpandoracontent/ExtraStatusCodes.h"
+
 #include <algorithm>
 #include <cstdlib>
 

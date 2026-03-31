@@ -16,6 +16,8 @@
 #include "larpandoracontent/LArHelpers/LArMCParticleHelper.h"
 #include "larpandoracontent/LArObjects/LArCaloHit.h"
 
+#include "larpandoracontent/ExtraStatusCodes.h"
+
 using namespace pandora;
 using namespace lar_content;
 

@@ -11,6 +11,8 @@
 #include "larpandoracontent/LArMonitoring/VisualMonitoringAlgorithm.h"
 #include "larpandoracontent/LArObjects/LArCaloHit.h"
 
+#include "larpandoracontent/ExtraStatusCodes.h"
+
 using namespace pandora;
 
 namespace lar_content

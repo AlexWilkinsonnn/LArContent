@@ -14,7 +14,6 @@
 
 #include "larpandoradlcontent/LArCheating/DLCheatHierarchyTool.h"
 #include "larpandoradlcontent/LArControlFlow/DLMasterAlgorithm.h"
-#include "larpandoradlcontent/LArEventClassification/CNNTrackShowerCountingAlgorithm.h"
 #include "larpandoradlcontent/LArMonitoring/DlHitValidationAlgorithm.h"
 #include "larpandoradlcontent/LArShowerGrowing/DLTwoDShowerGrowingAlgorithm.h"
 #include "larpandoradlcontent/LArSignalId/DlSNSignalAlgorithm.h"
@@ -40,14 +39,12 @@
     d("LArDLHitValidation",              DlHitValidationAlgorithm)                                    \
     d("LArDLNeutrinoHierarchy",          DLNeutrinoHierarchyAlgorithm)                                \
     d("LArDLPfoCharacterisation",        DlPfoCharacterisationAlgorithm)                              \
-    d("LArDLTwoDShowerGrowing",          DLTwoDShowerGrowingAlgorithm)                                    \
     d("LArDLSecondaryVertexing",         DlSecondaryVertexingAlgorithm)                               \
     d("LArDLSNSignal",                   DlSNSignalAlgorithm)                                         \
     d("LArDLThreeDClusterSplitting",     DLThreeDClusterSplittingAlgorithm)                           \
     d("LArDLTrackCharacterisation",      DlTrackCharacterisationAlgorithm)                            \
     d("LArDLTrackShowerStreamSelection", DlTrackShowerStreamSelectionAlgorithm)                       \
     d("LArDLVertexing",                  DlVertexingAlgorithm)                                        \
-    d("LArCNNTrackShowerCounting",       CNNTrackShowerCountingAlgorithm)                             \
     d("LArDLTwoDShowerGrowing",          DLTwoDShowerGrowingAlgorithm)
 
 #define LAR_DL_ALGORITHM_TOOL_LIST(d)                                                                                                     \
