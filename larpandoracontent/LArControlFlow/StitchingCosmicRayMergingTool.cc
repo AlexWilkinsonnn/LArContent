@@ -36,8 +36,15 @@ StitchingCosmicRayMergingTool::StitchingCosmicRayMergingTool() :
     m_relaxTransverseDisplacement(2.5f),
     m_minNCaloHits3D(0),
     m_maxX0FractionalDeviation(0.3f),
-    m_boundaryToleranceWidth(10.f)
+    m_boundaryToleranceWidth(10.f),
+    m_visualiseDeltaFromStraight(false)
 {
+}
+
+StitchingCosmicRayMergingTool::~StitchingCosmicRayMergingTool()
+{
+    if (m_visualiseDeltaFromStraight)
+        PANDORA_MONITORING_API(SaveTree(this->GetPandora(), "resids", "DeltaFromStraightValidation.root", "UPDATE"));
 }
 
 void StitchingCosmicRayMergingTool::Run(const MasterAlgorithm *const pAlgorithm, const PfoList *const pMultiPfoList,
@@ -551,6 +558,124 @@ void StitchingCosmicRayMergingTool::StitchPfos(const MasterAlgorithm *const pAlg
         pfoVectorToEnlarge.push_back(mapEntry.first);
     std::sort(pfoVectorToEnlarge.begin(), pfoVectorToEnlarge.end(), LArPfoHelper::SortByNHits);
 
+    if (m_visualiseDeltaFromStraight)
+    {
+        for (const auto &[pPfoKey, pfos] : pfoMerges)
+        {
+            if (pfos.size() != 2)
+            {
+                std::cout << "????? pfos.size()=" << pfos.size() << "\n";
+                break;
+            }
+            bool sawKeyPfo{false};
+            for (const ParticleFlowObject *const pPfo : pfos)
+            {
+                if (pPfoKey == pPfo)
+                    sawKeyPfo = true;
+            }
+            if (!sawKeyPfo)
+            {
+                std::cout << "What is up with the PfoMergeMap?????\n";
+                break;
+            }
+
+            const ParticleFlowObject *const pPfoA{*(pfos.begin())}, *const pPfoB{*(std::next(pfos.begin()))};
+            const LArTPC &larTPCA{*(pfoToLArTPCMap.at(pPfoA))}, &larTPCB{*(pfoToLArTPCMap.at(pPfoB))};
+            const unsigned int larTPCIDA{larTPCA.GetLArTPCVolumeId()}, larTPCIDB{larTPCB.GetLArTPCVolumeId()};
+            if (larTPCIDA == larTPCIDB)
+            {
+                std::cout << "PFOs are in the same LArTPC!!!!!!!!!!! Shouldn't happen!!!!!\n";
+                continue;
+            }
+            const ParticleFlowObject *const pPfo1{larTPCIDA < larTPCIDB ? pPfoA : pPfoB};
+            const ParticleFlowObject *const pPfo2{larTPCIDA < larTPCIDB ? pPfoB : pPfoA};
+
+            ThreeDPointingClusterMap::const_iterator iter1 = pointingClusterMap.find(pPfo1);
+            ThreeDPointingClusterMap::const_iterator iter2 = pointingClusterMap.find(pPfo2);
+            const LArPointingCluster &pointingCluster1(iter1->second);
+            const LArPointingCluster &pointingCluster2(iter2->second);
+
+            const LArTPC &larTPC1{*(pfoToLArTPCMap.at(pPfo1))}, &larTPC2{*(pfoToLArTPCMap.at(pPfo2))};
+            LArPointingCluster::Vertex pointingVertexNearest1, pointingVertexNearest2;
+            LArStitchingHelper::GetClosestVertices(larTPC1, larTPC2, pointingCluster1, pointingCluster2, pointingVertexNearest1, pointingVertexNearest2);
+
+            const LArPointingCluster::Vertex &pointingVertexFarthest1{
+                pointingVertexNearest1.IsInnerVertex() ? pointingCluster1.GetOuterVertex() : pointingCluster1.GetInnerVertex()};
+            const LArPointingCluster::Vertex &pointingVertexFarthest2{
+                pointingVertexNearest2.IsInnerVertex() ? pointingCluster2.GetOuterVertex() : pointingCluster2.GetInnerVertex()};
+
+            const CartesianVector &lineStart{pointingVertexFarthest1.GetPosition()}, &lineEnd{pointingVertexFarthest2.GetPosition()};
+            const CartesianVector lineVec{lineEnd - lineStart};
+            const CartesianVector lineDir{lineVec.GetUnitVector()};
+
+            CaloHitList caloHitList3D1;
+            LArPfoHelper::GetCaloHits(pPfo1, TPC_3D, caloHitList3D1);
+            CaloHitList caloHitList3D2;
+            LArPfoHelper::GetCaloHits(pPfo2, TPC_3D, caloHitList3D2);
+
+            const unsigned int larTPCID1{larTPC1.GetLArTPCVolumeId()}, larTPCID2{larTPC2.GetLArTPCVolumeId()};
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo1_tpcid", static_cast<int>(larTPCID1)));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo2_tpcid", static_cast<int>(larTPCID2)));
+
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo1_start_x", lineStart.GetX()));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo1_start_y", lineStart.GetY()));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo1_start_z", lineStart.GetZ()));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo2_end_x", lineEnd.GetX()));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo2_end_y", lineEnd.GetY()));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo2_end_z", lineEnd.GetZ()));
+
+            std::vector<float> pfo1XProjections, pfo1YProjections, pfo1ZProjections;
+            std::vector<float> pfo1XResiduals, pfo1YResiduals, pfo1ZResiduals;
+            for (const CaloHit *const pCaloHit3D : caloHitList3D1)
+            {
+                const CartesianVector &caloHitPos{pCaloHit3D->GetPositionVector()};
+                const CartesianVector caloHitRelPos{caloHitPos - lineStart};
+
+                const CartesianVector caloHitProj{lineStart + lineDir * caloHitRelPos.GetDotProduct(lineDir)};
+                pfo1XProjections.emplace_back(caloHitProj.GetX());
+                pfo1YProjections.emplace_back(caloHitProj.GetY());
+                pfo1ZProjections.emplace_back(caloHitProj.GetZ());
+
+                const CartesianVector caloHitResid{caloHitPos - caloHitProj};
+                pfo1XResiduals.emplace_back(caloHitResid.GetX());
+                pfo1YResiduals.emplace_back(caloHitResid.GetY());
+                pfo1ZResiduals.emplace_back(caloHitResid.GetZ());
+            }
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo1_projs_x", &pfo1XProjections));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo1_projs_y", &pfo1YProjections));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo1_projs_z", &pfo1ZProjections));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo1_resids_x", &pfo1XResiduals));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo1_resids_y", &pfo1YResiduals));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo1_resids_z", &pfo1ZResiduals));
+
+            std::vector<float> pfo2XProjections, pfo2YProjections, pfo2ZProjections;
+            std::vector<float> pfo2XResiduals, pfo2YResiduals, pfo2ZResiduals;
+            for (const CaloHit *const pCaloHit3D : caloHitList3D2)
+            {
+                const CartesianVector &caloHitPos{pCaloHit3D->GetPositionVector()};
+                const CartesianVector caloHitRelPos{caloHitPos - lineStart};
+
+                const CartesianVector caloHitProj{lineStart + lineDir * caloHitRelPos.GetDotProduct(lineDir)};
+                pfo2XProjections.emplace_back(caloHitProj.GetX());
+                pfo2YProjections.emplace_back(caloHitProj.GetY());
+                pfo2ZProjections.emplace_back(caloHitProj.GetZ());
+
+                const CartesianVector caloHitResid{caloHitPos - caloHitProj};
+                pfo2XResiduals.emplace_back(caloHitResid.GetX());
+                pfo2YResiduals.emplace_back(caloHitResid.GetY());
+                pfo2ZResiduals.emplace_back(caloHitResid.GetZ());
+            }
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo2_projs_x", &pfo2XProjections));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo2_projs_y", &pfo2YProjections));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo2_projs_z", &pfo2ZProjections));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo2_resids_x", &pfo2XResiduals));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo2_resids_y", &pfo2YResiduals));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "resids", "pfo2_resids_z", &pfo2ZResiduals));
+
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "resids"));
+        }
+    }
+
     for (const ParticleFlowObject *const pPfoToEnlarge : pfoVectorToEnlarge)
     {
         const PfoList &pfoList(pfoMerges.at(pPfoToEnlarge));
@@ -863,6 +988,9 @@ StatusCode StitchingCosmicRayMergingTool::ReadSettings(const TiXmlHandle xmlHand
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "BoundaryToleranceWidth", m_boundaryToleranceWidth));
+
+		PANDORA_RETURN_RESULT_IF_AND_IF(
+				STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "VisualiseDeltaFromStraight", m_visualiseDeltaFromStraight));
 
     return STATUS_CODE_SUCCESS;
 }
