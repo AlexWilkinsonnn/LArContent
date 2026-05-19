@@ -29,6 +29,8 @@ public:
      */
     StitchingCosmicRayMergingTool();
 
+    ~StitchingCosmicRayMergingTool();
+
     void Run(const MasterAlgorithm *const pAlgorithm, const pandora::PfoList *const pMultiPfoList, PfoToLArTPCMap &pfoToLArTPCMap,
         PfoToFloatMap &stitchedPfosToX0Map);
 
@@ -243,6 +245,8 @@ private:
     unsigned int m_minNCaloHits3D;
     float m_maxX0FractionalDeviation; ///< The maximum allowed fractional difference of an X0 contribution for matches to be stitched
     float m_boundaryToleranceWidth;   ///< The distance from the APA/CPA boundary inside which the deviation consideration is ignored
+
+    bool m_visualiseAssocCuts;
 };
 
 } // namespace lar_content

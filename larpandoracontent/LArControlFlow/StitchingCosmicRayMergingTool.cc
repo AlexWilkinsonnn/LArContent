@@ -36,9 +36,20 @@ StitchingCosmicRayMergingTool::StitchingCosmicRayMergingTool() :
     m_relaxTransverseDisplacement(2.5f),
     m_minNCaloHits3D(0),
     m_maxX0FractionalDeviation(0.3f),
-    m_boundaryToleranceWidth(10.f)
+    m_boundaryToleranceWidth(10.f),
+    m_visualiseAssocCuts(false)
 {
 }
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+StitchingCosmicRayMergingTool::~StitchingCosmicRayMergingTool()
+{
+    if (m_visualiseAssocCuts)
+        PANDORA_MONITORING_API(SaveTree(this->GetPandora(), "stitching_assocs", "StitchingValidation.root", "UPDATE"));
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
 
 void StitchingCosmicRayMergingTool::Run(const MasterAlgorithm *const pAlgorithm, const PfoList *const pMultiPfoList,
     PfoToLArTPCMap &pfoToLArTPCMap, PfoToFloatMap &stitchedPfosToX0Map)
@@ -184,15 +195,60 @@ void StitchingCosmicRayMergingTool::CreatePfoMatches(const LArTPC &larTPC1, cons
     ThreeDPointingClusterMap::const_iterator iter1 = pointingClusterMap.find(pPfo1);
     ThreeDPointingClusterMap::const_iterator iter2 = pointingClusterMap.find(pPfo2);
 
+    if (m_visualiseAssocCuts)
+    {
+        const unsigned int larTPCID1{larTPC1.GetLArTPCVolumeId()}, larTPCID2{larTPC2.GetLArTPCVolumeId()};
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_tpcid", static_cast<int>(larTPCID1)));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_tpcid", static_cast<int>(larTPCID2)));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "3d_mode", static_cast<int>(m_useXcoordinate)));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "matched", 0));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_lensq", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_lensq", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_nhits3d", -999));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_nhits3d", -999));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "cos_rel_angle", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_xdir", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_xdir", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "interset_x", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_rL", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_rL", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_rT", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_rT", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "min_rL", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_max_rL", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_max_rL", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfos_small_rT", -999.f));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfos_big_rT", -999.f));
+    }
+
     if (pointingClusterMap.end() == iter1 || pointingClusterMap.end() == iter2)
+    {
+        if (m_visualiseAssocCuts)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 0));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+        }
         return;
+    }
 
     const LArPointingCluster &pointingCluster1(iter1->second);
     const LArPointingCluster &pointingCluster2(iter2->second);
 
     // Check length of pointing clusters
+    if (m_visualiseAssocCuts)
+    {
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_lensq", pointingCluster1.GetLengthSquared()));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_lensq", pointingCluster2.GetLengthSquared()));
+    }
     if (pointingCluster1.GetLengthSquared() < m_minLengthSquared || pointingCluster2.GetLengthSquared() < m_minLengthSquared)
+    {
+        if (m_visualiseAssocCuts)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 1));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+        }
         return;
+    }
 
     // Get number of 3D hits in each of the pfos
     CaloHitList caloHitList3D1;
@@ -202,8 +258,22 @@ void StitchingCosmicRayMergingTool::CreatePfoMatches(const LArTPC &larTPC1, cons
     LArPfoHelper::GetCaloHits(pPfo2, TPC_3D, caloHitList3D2);
 
     // Check number of 3D hits in each of the pfos
+    if (m_visualiseAssocCuts)
+    {
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(),
+            "stitching_assocs", "pfo1_nhits3d", static_cast<int>(caloHitList3D1.size())));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(),
+            "stitching_assocs", "pfo2_nhits3d", static_cast<int>(caloHitList3D2.size())));
+    }
     if (caloHitList3D1.size() < m_minNCaloHits3D || caloHitList3D2.size() < m_minNCaloHits3D)
+    {
+        if (m_visualiseAssocCuts)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 2));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+        }
         return;
+    }
 
     // Get closest pair of vertices
     LArPointingCluster::Vertex pointingVertex1, pointingVertex2;
@@ -214,27 +284,62 @@ void StitchingCosmicRayMergingTool::CreatePfoMatches(const LArTPC &larTPC1, cons
     }
     catch (const pandora::StatusCodeException &)
     {
+        if (m_visualiseAssocCuts)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 3));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+        }
         return;
     }
 
     // Pointing clusters must have a parallel direction
     const float cosRelativeAngle(-pointingVertex1.GetDirection().GetDotProduct(pointingVertex2.GetDirection()));
 
+    if (m_visualiseAssocCuts)
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "cos_rel_angle", cosRelativeAngle));
     if (cosRelativeAngle < m_relaxCosRelativeAngle)
+    {
+        if (m_visualiseAssocCuts)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 4));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+        }
         return;
+    }
 
     // Pointing clusters must have a non-zero X direction (so that they point across drift volume boundary)
     const float pX1(std::fabs(pointingVertex1.GetDirection().GetX()));
     const float pX2(std::fabs(pointingVertex2.GetDirection().GetX()));
 
+    if (m_visualiseAssocCuts)
+    {
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_xdir", pX1));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_xdir", pX2));
+    }
     if (pX1 < std::numeric_limits<float>::epsilon() || pX2 < std::numeric_limits<float>::epsilon())
+    {
+        if (m_visualiseAssocCuts)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 5));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+        }
         return;
+    }
 
     // Pointing clusters must intersect at a drift volume boundary
     const float intersectX(0.5 * (pointingVertex1.GetPosition().GetX() + pointingVertex2.GetPosition().GetX()));
 
+    if (m_visualiseAssocCuts)
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "intersect_x", intersectX));
     if (std::fabs(intersectX - boundaryCenterX) > maxLongitudinalDisplacementX)
+    {
+        if (m_visualiseAssocCuts)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 6));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+        }
         return;
+    }
 
     // Impact parameters
     float rT1(0.f), rL1(0.f), rT2(0.f), rL2(0.f);
@@ -254,7 +359,19 @@ void StitchingCosmicRayMergingTool::CreatePfoMatches(const LArTPC &larTPC1, cons
     }
     catch (const pandora::StatusCodeException &)
     {
+        if (m_visualiseAssocCuts)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 7));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+        }
         return;
+    }
+    if (m_visualiseAssocCuts)
+    {
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_rL", rL1));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_rL", rL2));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_rT", rT1));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_rT", rT2));
     }
 
     const float minL((!LArGeometryHelper::IsInGap(this->GetPandora(), pointingVertex1.GetPosition(), TPC_3D) ||
@@ -270,15 +387,36 @@ void StitchingCosmicRayMergingTool::CreatePfoMatches(const LArTPC &larTPC1, cons
     const float maxL1(maxLongitudinalDisplacementX / dXdL1);
     const float maxL2(maxLongitudinalDisplacementX / dXdL2);
 
+    if (m_visualiseAssocCuts)
+    {
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "min_rL", minL));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo1_max_rL", maxL1));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "pfo2_max_rL", maxL2));
+    }
+
     if (rL1 < minL || rL1 > maxL1 || rL2 < minL || rL2 > maxL2)
+    {
+        if (m_visualiseAssocCuts)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 8));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+        }
         return;
+    }
 
     // Selection cuts on transverse impact parameters
     const bool minPass(std::min(rT1, rT2) < m_relaxTransverseDisplacement && cosRelativeAngle > m_relaxCosRelativeAngle);
     const bool maxPass(std::max(rT1, rT2) < m_maxTransverseDisplacement && cosRelativeAngle > m_minCosRelativeAngle);
 
     if (!minPass && !maxPass)
+    {
+        if (m_visualiseAssocCuts)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 9));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+        }
         return;
+    }
 
     // Store this association
     const PfoAssociation::VertexType vertexType1(pointingVertex1.IsInnerVertex() ? PfoAssociation::INNER : PfoAssociation::OUTER);
@@ -289,6 +427,12 @@ void StitchingCosmicRayMergingTool::CreatePfoMatches(const LArTPC &larTPC1, cons
 
     pfoAssociationMatrix[pPfo1].insert(PfoAssociationMap::value_type(pPfo2, PfoAssociation(vertexType1, vertexType2, particleLength2)));
     pfoAssociationMatrix[pPfo2].insert(PfoAssociationMap::value_type(pPfo1, PfoAssociation(vertexType2, vertexType1, particleLength1)));
+    if (m_visualiseAssocCuts)
+    {
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "return_condition", 10));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "stitching_assocs", "matched", 1));
+        PANDORA_MONITORING_API(FillTree(this->GetPandora(), "stitching_assocs"));
+    }
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -863,6 +1007,8 @@ StatusCode StitchingCosmicRayMergingTool::ReadSettings(const TiXmlHandle xmlHand
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "BoundaryToleranceWidth", m_boundaryToleranceWidth));
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "VisualiseAssocCuts", m_visualiseAssocCuts));
 
     return STATUS_CODE_SUCCESS;
 }
