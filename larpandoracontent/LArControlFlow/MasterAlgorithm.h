@@ -44,6 +44,8 @@ public:
      */
     MasterAlgorithm();
 
+    ~MasterAlgorithm();
+
     /**
      *  @brief  External steering parameters class
      */
@@ -354,6 +356,8 @@ protected:
 
     float m_inTimeMaxX0;                   ///< Cut on X0 to determine whether particle is clear cosmic ray
     LArCaloHitFactory m_larCaloHitFactory; ///< Factory for creating LArCaloHits during hit copying
+
+    bool m_visualiseX0Shift;
 };
 
 } // namespace lar_content

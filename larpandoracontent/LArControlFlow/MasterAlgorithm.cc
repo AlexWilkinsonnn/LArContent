@@ -51,8 +51,17 @@ MasterAlgorithm::MasterAlgorithm() :
     m_fullWidthCRWorkerWireGaps(true),
     m_passMCParticlesToWorkerInstances(false),
     m_filePathEnvironmentVariable("FW_SEARCH_PATH"),
-    m_inTimeMaxX0(1.f)
+    m_inTimeMaxX0(1.f),
+    m_visualiseX0Shift(false)
 {
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+MasterAlgorithm::~MasterAlgorithm()
+{
+    if (m_visualiseX0Shift)
+        PANDORA_MONITORING_API(SaveTree(this->GetPandora(), "x0_shifts", "X0ShiftValidation.root", "UPDATE"));
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -382,6 +391,14 @@ StatusCode MasterAlgorithm::TagCosmicRayPfos(const PfoToFloatMap &stitchedPfosTo
         const float x0Shift((pfoToX0Iter != stitchedPfosToX0Map.end()) ? pfoToX0Iter->second : 0.f);
         PfoList &targetList((std::fabs(x0Shift) > m_inTimeMaxX0) ? clearCosmicRayPfos : nonStitchedParentCosmicRayPfos);
         targetList.push_back(pPfo);
+
+        if (m_visualiseX0Shift)
+        {
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), "x0_shifts", "x0shift", x0Shift));
+            PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(),
+                "x0_shifts", "stitched", (pfoToX0Iter != stitchedPfosToX0Map.end()) ? 1 : 0));
+            PANDORA_MONITORING_API(FillTree(this->GetPandora(), "x0_shifts"));
+        }
     }
 
     for (CosmicRayTaggingBaseTool *const pCosmicRayTaggingTool : m_cosmicRayTaggingToolVector)
@@ -1215,6 +1232,8 @@ StatusCode MasterAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "RecreatedClusterListName", m_recreatedClusterListName));
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, XmlHelper::ReadValue(xmlHandle, "RecreatedVertexListName", m_recreatedVertexListName));
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "InTimeMaxX0", m_inTimeMaxX0));
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "VisualiseX0Shift", m_visualiseX0Shift));
 
     return STATUS_CODE_SUCCESS;
 }
