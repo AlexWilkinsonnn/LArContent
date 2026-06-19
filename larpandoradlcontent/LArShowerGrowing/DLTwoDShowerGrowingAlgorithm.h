@@ -311,6 +311,8 @@ private:
     std::vector<unsigned int> m_encodeLArTPCVolIDs; ///< LArTPC vol IDs for one-hot encoding of drift vols in hit feature vector, must be same size as m_encodeDaughterVolIDs
     std::vector<unsigned int> m_encodeDaughterVolIDs; ///< Daughter vol IDs for one-hot encoding of drift vols in hit feature vector, must be sae size as m_encodeLArTPCVolIDs
 
+    bool m_useOriginAsVertex; ///< Daughter vol IDs for one-hot encoding of drift vols in hit feature vector, must be sae size as m_encodeLArTPCVolIDs
+
     /* End configurable via xml members */
 };
 

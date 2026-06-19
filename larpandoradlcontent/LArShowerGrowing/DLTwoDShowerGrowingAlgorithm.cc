@@ -71,7 +71,8 @@ DLTwoDShowerGrowingAlgorithm::DLTwoDShowerGrowingAlgorithm() :
     m_includeHitCardinalityFeatures{true},
     m_includeHitNIterationNumFeature{false},
     m_encodeLArTPCVolIDs{std::vector<unsigned int>{}},
-    m_encodeDaughterVolIDs{std::vector<unsigned int>{}}
+    m_encodeDaughterVolIDs{std::vector<unsigned int>{}},
+    m_useOriginAsVertex{false}
 {
 }
 
@@ -216,6 +217,11 @@ void DLTwoDShowerGrowingAlgorithm::WriteTrainingSample() const
 
 std::map<HitType, CartesianVector> DLTwoDShowerGrowingAlgorithm::Get2DVertices() const
 {
+    if (m_useOriginAsVertex)
+        return {{TPC_VIEW_U, LArGeometryHelper::ProjectPosition(this->GetPandora(), {0.f, 0.f, 0.f}, TPC_VIEW_U)},
+            {TPC_VIEW_V, LArGeometryHelper::ProjectPosition(this->GetPandora(), {0.f, 0.f, 0.f}, TPC_VIEW_V)},
+            {TPC_VIEW_W, LArGeometryHelper::ProjectPosition(this->GetPandora(), {0.f, 0.f, 0.f}, TPC_VIEW_W)}};
+
     const VertexList *pVertexList{nullptr};
     PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, m_vertexListName, pVertexList));
     const Vertex *const pVertex{pVertexList->front()};
@@ -795,6 +801,9 @@ StatusCode DLTwoDShowerGrowingAlgorithm::ReadSettings(const TiXmlHandle xmlHandl
         }
     }
     PANDORA_THROW_IF(STATUS_CODE_INVALID_PARAMETER, !m_trainingMode && m_includeDistToXGapFeature && m_detectorXGaps.empty());
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=,
+        XmlHelper::ReadValue(xmlHandle, "UseOriginAsVertex", m_useOriginAsVertex));
 
     return STATUS_CODE_SUCCESS;
 }
