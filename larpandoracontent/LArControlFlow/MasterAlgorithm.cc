@@ -160,6 +160,10 @@ StatusCode MasterAlgorithm::Run()
     if (m_passMCParticlesToWorkerInstances)
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CopyMCParticles());
 
+    if (m_pSliceNuWorkerInstance)
+        PandoraApi::SetEventInformation(
+            *m_pSliceNuWorkerInstance, this->GetPandora().GetRun(), this->GetPandora().GetSubrun(), this->GetPandora().GetEvent());
+
     PfoToFloatMap stitchedPfosToX0Map;
     VolumeIdToHitListMap volumeIdToHitListMap;
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetVolumeIdToHitListMap(volumeIdToHitListMap));
@@ -915,6 +919,8 @@ const Pandora *MasterAlgorithm::CreateWorkerInstance(
     PANDORA_THROW_RESULT_IF(
         STATUS_CODE_SUCCESS, !=, PandoraApi::SetLArTransformationPlugin(*pPandora, new lar_content::LArRotationalTransformationPlugin));
     PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->RegisterCustomContent(pPandora));
+    PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+        PandoraApi::SetEventInformation(*pPandora, this->GetPandora().GetRun(), this->GetPandora().GetSubrun(), this->GetPandora().GetEvent()));
     MultiPandoraApi::AddDaughterPandoraInstance(&(this->GetPandora()), pPandora);
 
     // The LArTPC
@@ -990,6 +996,8 @@ const Pandora *MasterAlgorithm::CreateWorkerInstance(
     PANDORA_THROW_RESULT_IF(
         STATUS_CODE_SUCCESS, !=, PandoraApi::SetLArTransformationPlugin(*pPandora, new lar_content::LArRotationalTransformationPlugin));
     PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->RegisterCustomContent(pPandora));
+    PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=,
+        PandoraApi::SetEventInformation(*pPandora, this->GetPandora().GetRun(), this->GetPandora().GetSubrun(), this->GetPandora().GetEvent()));
     MultiPandoraApi::AddDaughterPandoraInstance(&(this->GetPandora()), pPandora);
 
     // The Parent LArTPC
