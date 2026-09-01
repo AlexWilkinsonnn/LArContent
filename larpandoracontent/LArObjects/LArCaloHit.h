@@ -30,6 +30,9 @@ public:
     pandora::InputUInt m_larTPCVolumeId;    ///< The lar tpc volume id
     pandora::InputUInt m_daughterVolumeId;  ///< The daughter volume id
     pandora::InputFloat m_width;            ///< The width of the optical hit
+    pandora::InputFloat m_startTime;        ///< The start time of the optical hit
+    pandora::InputFloat m_riseTime;         ///< The rise time of the optical hit
+    pandora::InputFloat m_fastToTotal;      ///< The fast to total (time?) of the optical hit
     pandora::InputUInt  m_channel;          ///< The optical detector channel - ATTN: maybe daughter volume can be used instead 
     pandora::FloatVector m_hitScores;       ///< Hit scores
     pandora::StringVector m_hitScoreLabels; ///< Labels for the hit scores
@@ -145,6 +148,27 @@ public:
     float GetWidth() const;
 
     /**
+     *  @brief  Get the start time
+     *
+     *  @return the start time
+     */
+    float GetStartTime() const;
+
+    /**
+     *  @brief  Get the rise time
+     *
+     *  @return the rise time
+     */
+    float GetRiseTime() const;
+
+    /**
+     *  @brief  Get the fast to total (time?)
+     *
+     *  @return the fast to total (time?)
+     */
+    float GetFastToTotal() const;
+
+    /**
      *  @brief  Get the channel of the hit
      *
      *  @return the channel of the hit
@@ -160,6 +184,9 @@ public:
 
 private:
     float m_width;          ///< The width of the optical hit
+    float m_startTime;      ///< The start time of the optical hit
+    float m_riseTime;       ///< The rise time of the optical hit
+    float m_fastToTotal;    ///< The fast to total (time?) of the optical hit
     unsigned int m_channel; ///< The channel of the hit
 };
 
@@ -323,6 +350,9 @@ inline void LArCaloHit::SetShowerProbability(const float probability)
 inline LArOpHit::LArOpHit(const LArHitParameters &parameters) :
     object_creation::CaloHit::Object(parameters),
     m_width(parameters.m_width.Get()),
+    m_startTime(parameters.m_startTime.Get()),
+    m_riseTime(parameters.m_riseTime.Get()),
+    m_fastToTotal(parameters.m_fastToTotal.Get()),
     m_channel(parameters.m_channel.Get())
 {
 }
@@ -332,6 +362,27 @@ inline LArOpHit::LArOpHit(const LArHitParameters &parameters) :
 inline float LArOpHit::GetWidth() const
 {
     return m_width;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+inline float LArOpHit::GetStartTime() const
+{
+    return m_startTime;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+inline float LArOpHit::GetRiseTime() const
+{
+    return m_riseTime;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
+inline float LArOpHit::GetFastToTotal() const
+{
+    return m_fastToTotal;
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------------
@@ -367,6 +418,9 @@ inline void LArOpHit::FillParameters(LArHitParameters &parameters) const
     // ATTN Set the parent address to the original owner of the calo hit
     parameters.m_pParentAddress = static_cast<const void *>(this);
     parameters.m_width = this->GetWidth();
+    parameters.m_startTime = this->GetStartTime();
+    parameters.m_riseTime = this->GetRiseTime();
+    parameters.m_fastToTotal = this->GetFastToTotal();
     parameters.m_channel = this->GetChannel();
 }
 
@@ -419,18 +473,27 @@ inline pandora::StatusCode LArHitFactory::Read(Parameters &parameters, pandora::
         case pandora::OPTICAL_TPC:
         {
             float width(0.f);
+            float startTime(0.f);
+            float riseTime(0.f);
+            float fastToTotal(0.f);
             unsigned int channel(0);
 
             if (pandora::BINARY == fileReader.GetFileType())
             {
                 pandora::BinaryFileReader &binaryFileReader(dynamic_cast<pandora::BinaryFileReader &>(fileReader));
                 PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileReader.ReadVariable(width));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileReader.ReadVariable(startTime));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileReader.ReadVariable(riseTime));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileReader.ReadVariable(fastToTotal));
                 PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileReader.ReadVariable(channel));
             }
             else if (pandora::XML == fileReader.GetFileType())
             {
                 pandora::XmlFileReader &xmlFileReader(dynamic_cast<pandora::XmlFileReader &>(fileReader));
                 PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileReader.ReadVariable("OpticalWidth", width));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileReader.ReadVariable("OpticalStartTime", startTime));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileReader.ReadVariable("OpticalRiseTime", riseTime));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileReader.ReadVariable("OpticalFastToTotal", fastToTotal));
                 PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileReader.ReadVariable("OpticalChannel", channel));
             }
             else
@@ -440,6 +503,9 @@ inline pandora::StatusCode LArHitFactory::Read(Parameters &parameters, pandora::
 
             LArHitParameters &larOpHitParameters(dynamic_cast<LArHitParameters &>(parameters));
             larOpHitParameters.m_width = width;
+            larOpHitParameters.m_startTime = startTime;
+            larOpHitParameters.m_riseTime = riseTime;
+            larOpHitParameters.m_fastToTotal = fastToTotal;
             larOpHitParameters.m_channel = channel;
 
             return pandora::STATUS_CODE_SUCCESS;
@@ -538,12 +604,18 @@ inline pandora::StatusCode LArHitFactory::Write(const Object *const pObject, pan
             {
                 pandora::BinaryFileWriter &binaryFileWriter(dynamic_cast<pandora::BinaryFileWriter &>(fileWriter));
                 PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileWriter.WriteVariable(pLArOpHit->GetWidth()));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileWriter.WriteVariable(pLArOpHit->GetStartTime()));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileWriter.WriteVariable(pLArOpHit->GetRiseTime()));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileWriter.WriteVariable(pLArOpHit->GetFastToTotal()));
                 PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileWriter.WriteVariable(pLArOpHit->GetChannel()));
             }
             else if (pandora::XML == fileWriter.GetFileType())
             {
                 pandora::XmlFileWriter &xmlFileWriter(dynamic_cast<pandora::XmlFileWriter &>(fileWriter));
                 PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileWriter.WriteVariable("OpticalWidth", pLArOpHit->GetWidth()));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileWriter.WriteVariable("OpticalStartTime", pLArOpHit->GetStartTime()));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileWriter.WriteVariable("OpticalRiseTime", pLArOpHit->GetRiseTime()));
+                PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileWriter.WriteVariable("OpticalFastToTotal", pLArOpHit->GetFastToTotal()));
                 PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileWriter.WriteVariable("OpticalChannel", pLArOpHit->GetChannel()));
             }
             else
