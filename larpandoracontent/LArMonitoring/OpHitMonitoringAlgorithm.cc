@@ -43,7 +43,7 @@ StatusCode OpHitMonitoringAlgorithm::Run()
 {
     PANDORA_MONITORING_API(SetEveDisplayParameters(this->GetPandora(), true, DETECTOR_VIEW_XZ, -1, 1, 1));
 
-    for (const auto pfoListName : m_pfoListNames)
+    for (const auto &pfoListName : m_pfoListNames)
     {
         PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->VisualizePfos(pfoListName));
     }
