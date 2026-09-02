@@ -87,6 +87,7 @@ public:
     pandora::InputInt m_process;                  ///< The process creating the particle
     pandora::InputBool m_isCC;                    ///< Whether the neutrino interacts via a CC interaction (always false for non-neutrinos)
     pandora::InputFloat m_visibleEnergy;          ///< Energy 'seen' in the detector
+    pandora::InputFloat m_t0;
     pandora::InputCartesianVector m_endDirection; ///< Obtained from the momentum at the penultimate trajectory point
     pandora::InputInt m_nTrajPoints;              ///< Number of trajectory points
     pandora::CartesianPointVector m_trajPoints;   ///< the MCParticle trajectory points
@@ -143,6 +144,8 @@ public:
      */
     float GetVisibleEnergy() const;
 
+    float GetT0() const;
+
     /**
      *  @brief  Get the end direction
      *
@@ -170,6 +173,7 @@ private:
     int m_process;                              ///< The process that created the particle
     bool m_isCC;                                ///< Whether the neutrino interacts via a CC interaction (always false for non-neutrinos)
     float m_visibleEnergy;                      ///< Energy 'seen' in the detector
+    float m_t0;
     pandora::CartesianVector m_endDirection;    ///< Obtained from the momentum at the penultimate trajectory point
     int m_nTrajPoints;                          ///< The number of trajectory points
     pandora::CartesianPointVector m_trajPoints; ///< the MCParticle trajectory points
@@ -234,6 +238,7 @@ inline LArMCParticle::LArMCParticle(const LArMCParticleParameters &parameters) :
     m_process(parameters.m_process.Get()),
     m_isCC(parameters.m_isCC.Get()),
     m_visibleEnergy(parameters.m_visibleEnergy.Get()),
+    m_t0(parameters.m_t0.Get()),
     m_endDirection(parameters.m_endDirection.Get()),
     m_nTrajPoints(parameters.m_nTrajPoints.Get()),
     m_trajPoints(parameters.m_trajPoints)
@@ -263,6 +268,13 @@ inline float LArMCParticle::GetVisibleEnergy() const
 
 //------------------------------------------------------------------------------------------------------------------------------------------
 
+inline float LArMCParticle::GetT0() const
+{
+    return m_t0;
+}
+
+//------------------------------------------------------------------------------------------------------------------------------------------
+
 inline pandora::CartesianVector LArMCParticle::GetEndDirection() const
 {
     return m_endDirection;
@@ -288,6 +300,7 @@ inline void LArMCParticle::FillParameters(LArMCParticleParameters &parameters) c
 {
     parameters.m_nuanceCode = this->GetNuanceCode();
     parameters.m_visibleEnergy = this->GetVisibleEnergy();
+    parameters.m_t0 = this->GetT0();
     parameters.m_endDirection = this->GetEndDirection();
     parameters.m_nTrajPoints = this->GetNTrajPoints();
     parameters.m_trajPoints = this->GetTrajPoints();
@@ -344,6 +357,7 @@ inline pandora::StatusCode LArMCParticleFactory::Read(Parameters &parameters, pa
     int process(0);
     bool isCC(false);
     float visibleEnergy(0.f);
+    float t0(0.f);
     pandora::CartesianVector endDirection(0.f, 0.f, 0.f);
     int nTrajPoints(0);
     pandora::CartesianPointVector trajPoints;
@@ -360,6 +374,7 @@ inline pandora::StatusCode LArMCParticleFactory::Read(Parameters &parameters, pa
         {
             PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileReader.ReadVariable(isCC));
             PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileReader.ReadVariable(visibleEnergy));
+            PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileReader.ReadVariable(t0));
             PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileReader.ReadVariable(endDirection));
             PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileReader.ReadVariable(nTrajPoints));
 
@@ -385,6 +400,7 @@ inline pandora::StatusCode LArMCParticleFactory::Read(Parameters &parameters, pa
         {
             PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileReader.ReadVariable("IsCC", isCC));
             PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileReader.ReadVariable("VisibleEnergy", visibleEnergy));
+            PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileReader.ReadVariable("t0", t0));
             PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileReader.ReadVariable("EndDirection", endDirection));
             PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, xmlFileReader.ReadVariable("NTrajPoints", nTrajPoints));
 
@@ -408,6 +424,7 @@ inline pandora::StatusCode LArMCParticleFactory::Read(Parameters &parameters, pa
     larMCParticleParameters.m_process = process;
     larMCParticleParameters.m_isCC = isCC;
     larMCParticleParameters.m_visibleEnergy = visibleEnergy;
+    larMCParticleParameters.m_t0 = t0;
     larMCParticleParameters.m_endDirection = endDirection;
     larMCParticleParameters.m_nTrajPoints = nTrajPoints;
     larMCParticleParameters.m_trajPoints = trajPoints;
@@ -441,6 +458,9 @@ inline pandora::StatusCode LArMCParticleFactory::Write(const Object *const pObje
             PANDORA_RETURN_RESULT_IF(
                 pandora::STATUS_CODE_SUCCESS, !=, binaryFileWriter.WriteVariable(static_cast<float>(pLArMCParticle->GetVisibleEnergy())));
 
+            PANDORA_RETURN_RESULT_IF(
+                pandora::STATUS_CODE_SUCCESS, !=, binaryFileWriter.WriteVariable(static_cast<float>(pLArMCParticle->GetT0())));
+
             PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=, binaryFileWriter.WriteVariable(pLArMCParticle->GetEndDirection()));
 
             const int nTrajPoints(pLArMCParticle->GetNTrajPoints());
@@ -473,6 +493,9 @@ inline pandora::StatusCode LArMCParticleFactory::Write(const Object *const pObje
 
             PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=,
                 xmlFileWriter.WriteVariable("VisibleEnergy", static_cast<float>(pLArMCParticle->GetVisibleEnergy())));
+
+            PANDORA_RETURN_RESULT_IF(pandora::STATUS_CODE_SUCCESS, !=,
+                xmlFileWriter.WriteVariable("t0", static_cast<float>(pLArMCParticle->GetT0())));
 
             PANDORA_RETURN_RESULT_IF(
                 pandora::STATUS_CODE_SUCCESS, !=, xmlFileWriter.WriteVariable("EndDirection", (pLArMCParticle->GetEndDirection())));
