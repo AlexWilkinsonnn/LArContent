@@ -61,6 +61,7 @@ private:
     float m_opticalMagnitudeScale;           ///< Scale factor for converting hit magnitude into detector coordinates
     float m_opticalTimeMin;                  ///< Minimum time of the optical detector time axes [us] (or [ns]?)
     float m_opticalTimeMax;                  ///< Maximum time of the optical detector time axes [us] (or [ns]?)
+    bool m_showOutliers;                     ///< Flag to draw optical hits that fall outside of m_opticalTimeMin and m_opticalTimeMax
     bool m_simpleMode;                       ///< Flag to draw optical hits as markers at the optical detector xy, ignore time information
 
     /** Other members **/

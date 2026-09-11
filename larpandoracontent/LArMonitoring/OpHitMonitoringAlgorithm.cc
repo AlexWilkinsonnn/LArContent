@@ -24,9 +24,10 @@ namespace lar_content
 
 OpHitMonitoringAlgorithm::OpHitMonitoringAlgorithm() :
     m_opticalTimeExtent{50.f},
-    m_opticalMagnitudeScale{0.05f},
+    m_opticalMagnitudeScale{0.01f},
     m_opticalTimeMin{0.f},
-    m_opticalTimeMax{10.f},
+    m_opticalTimeMax{0.1f},
+    m_showOutliers{false},
     m_simpleMode{false}
 {
 }
@@ -107,20 +108,29 @@ StatusCode OpHitMonitoringAlgorithm::VisualizeOpHit(const CaloHit *const pCaloHi
     const float displayTime{std::max(m_opticalTimeMin, std::min(peakTime, m_opticalTimeMax))};
 
     const float prePeakTime{peakTime - pOpHit->GetStartTime()};
-    const float xStart{pos.GetX() - (0.5f * m_opticalTimeExtent) + (displayTime - m_opticalTimeMin - prePeakTime) * m_opticalTimeScale};
+    const float xStart{pos.GetX() - (0.5f * m_opticalTimeExtent) +
+        std::max((displayTime - m_opticalTimeMin - prePeakTime) * m_opticalTimeScale, 0.f)};
     const float postPeakTime{pOpHit->GetWidth() - prePeakTime};
-    const float xEnd{pos.GetX() - (0.5f * m_opticalTimeExtent) + (displayTime - m_opticalTimeMin + postPeakTime) * m_opticalTimeScale};
+    const float xEnd{pos.GetX() - (0.5f * m_opticalTimeExtent) +
+        std::min((displayTime - m_opticalTimeMin + postPeakTime) * m_opticalTimeScale, m_opticalTimeExtent)};
     const CartesianVector timeXStartPos(xStart, pos.GetY(), pos.GetZ());
     const CartesianVector timeXEndPos(xEnd, pos.GetY(), pos.GetZ());
+    const float xPeak{pos.GetX() - (0.5f * m_opticalTimeExtent) + (displayTime - m_opticalTimeMin) * m_opticalTimeScale};
 
-    const CartesianVector peakPos((xStart + xEnd) * 0.5f, pos.GetY(), pos.GetZ());
-    const CartesianVector magnitudeYStartPos(peakPos.GetX(), peakPos.GetY() - magnitudeLength, peakPos.GetZ());
-    const CartesianVector magnitudeYEndPos(peakPos.GetX(), peakPos.GetY() + magnitudeLength, peakPos.GetZ());
-    const CartesianVector magnitudeZStartPos(peakPos.GetX(), peakPos.GetY(), peakPos.GetZ() - magnitudeLength);
-    const CartesianVector magnitudeZEndPos(peakPos.GetX(), peakPos.GetY(), peakPos.GetZ() + magnitudeLength);
+    const CartesianVector magnitudeYStartPos(xPeak, pos.GetY() - magnitudeLength, pos.GetZ());
+    const CartesianVector magnitudeYEndPos(xPeak, pos.GetY() + magnitudeLength, pos.GetZ());
+    const CartesianVector magnitudeZStartPos(xPeak, pos.GetY(), pos.GetZ() - magnitudeLength);
+    const CartesianVector magnitudeZEndPos(xPeak, pos.GetY(), pos.GetZ() + magnitudeLength);
 
     // Draw RED if peak time falls in underflow/overflow bin
-    const Color hitColor{(peakTime < m_opticalTimeMin) || (peakTime > m_opticalTimeMax) ? RED : ORANGE}; 
+    Color hitColor{ORANGE};
+    if ((peakTime < m_opticalTimeMin) || (peakTime > m_opticalTimeMax))
+    {
+        if (!m_showOutliers)
+            return STATUS_CODE_SUCCESS;
+        else
+            hitColor = RED;
+    }
 
     detectorPositions.emplace(pOpHit->GetChannel(), pos);
     PANDORA_MONITORING_API(AddLineToVisualization(this->GetPandora(), &timeXStartPos, &timeXEndPos, "OpHit time width", hitColor, 6, 1));
@@ -171,6 +181,9 @@ StatusCode OpHitMonitoringAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
     if (m_opticalTimeMax <= m_opticalTimeMin)
         return STATUS_CODE_INVALID_PARAMETER;
     m_opticalTimeScale = m_opticalTimeExtent / (m_opticalTimeMax - m_opticalTimeMin);
+
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "ShowOutliers", m_showOutliers));
 
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "SimpleMode", m_simpleMode));
