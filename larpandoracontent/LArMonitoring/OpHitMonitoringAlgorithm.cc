@@ -80,7 +80,7 @@ StatusCode OpHitMonitoringAlgorithm::VisualizePfos(const std::string &listName) 
             std::cout << "OpHitMonitoringAlgorithm: pfo list " << listName << " unavailable." << std::endl;
         return STATUS_CODE_SUCCESS;
     }
-    PANDORA_MONITORING_API(VisualizeParticleFlowObjects(this->GetPandora(), pPfoList, listName.c_str(), AUTOITER, true, true));
+    PANDORA_MONITORING_API(VisualizeParticleFlowObjects(this->GetPandora(), pPfoList, listName.c_str(), AUTOITER, true, false));
 
     return STATUS_CODE_SUCCESS;
 }
@@ -99,7 +99,7 @@ StatusCode OpHitMonitoringAlgorithm::VisualizeOpHit(const CaloHit *const pCaloHi
 
     if (m_simpleMode)
     {
-        const int markerSize{static_cast<int>(std::ceil(magnitudeLength))};
+        const int markerSize{static_cast<int>(std::ceil(magnitudeLength * 0.1))};
         PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &pos, "Optical Hit", ORANGE, markerSize));
         return STATUS_CODE_SUCCESS;
     }
