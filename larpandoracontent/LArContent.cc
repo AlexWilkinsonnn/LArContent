@@ -59,6 +59,7 @@
 #include "larpandoracontent/LArMonitoring/EventClusterValidationAlgorithm.h"
 #include "larpandoracontent/LArMonitoring/HierarchyMonitoringAlgorithm.h"
 #include "larpandoracontent/LArMonitoring/HierarchyValidationAlgorithm.h"
+#include "larpandoracontent/LArMonitoring/LightClusterVisualisationAlgorithm.h"
 #include "larpandoracontent/LArMonitoring/MCParticleMonitoringAlgorithm.h"
 #include "larpandoracontent/LArMonitoring/MuonLeadingEventValidationAlgorithm.h"
 #include "larpandoracontent/LArMonitoring/NeutrinoEventValidationAlgorithm.h"
@@ -89,6 +90,14 @@
 #include "larpandoracontent/LArShowerRefinement/ProtoShowerMatchingTool.h"
 #include "larpandoracontent/LArShowerRefinement/ShowerSpineFinderTool.h"
 #include "larpandoracontent/LArShowerRefinement/ShowerStartFinderTool.h"
+
+#include "larpandoracontent/LArSolutions/SolutionExampleAlgorithm.h"
+#include "larpandoracontent/LArSolutions/SolutionSimpleClusterCreationAlgorithm.h"
+#include "larpandoracontent/LArSolutions/SolutionSimpleClusterMergingAlgorithm.h"
+#include "larpandoracontent/LArSolutions/SolutionSimpleClusterSplittingAlgorithm.h"
+#include "larpandoracontent/LArSolutions/SolutionLightAlgorithm.h"
+#include "larpandoracontent/LArSolutions/SolutionLightClusteringAlgorithm.h"
+#include "larpandoracontent/LArSolutions/SolutionChargeLightMatchingAlgorithm.h"
 
 #include "larpandoracontent/LArThreeDReco/LArCosmicRay/AmbiguousDeltaRayTool.h"
 #include "larpandoracontent/LArThreeDReco/LArCosmicRay/CosmicRayRemovalTool.h"
@@ -245,6 +254,7 @@
 
 // clang-format off
 #define LAR_ALGORITHM_LIST(d)                                                                                                   \
+    d("LArLightClusterVisualisation",        LightClusterVisualisationAlgorithm)                                                \
     d("LArValidation",                          ValidationAlgorithm)                                                            \
     d("LArElectronInitialRegionRefinement",     ElectronInitialRegionRefinementAlgorithm)                                       \
     d("LArNeutrinoEventValidation",             NeutrinoEventValidationAlgorithm)                                               \
@@ -368,7 +378,14 @@
     d("LArHitAngleVertexSelection",             HitAngleVertexSelectionAlgorithm)                                               \
     d("LArBdtVertexSelection",                  BdtVertexSelectionAlgorithm)                                                    \
     d("LArSvmVertexSelection",                  SvmVertexSelectionAlgorithm)                                                    \
-    d("LArVertexRefinement",                    VertexRefinementAlgorithm)
+    d("LArVertexRefinement",                    VertexRefinementAlgorithm)                                                      \
+    d("LArSolutionExample",                     SolutionExampleAlgorithm)                                                       \
+    d("LArSolutionSimpleClusterCreation",       SolutionSimpleClusterCreationAlgorithm)                                         \
+    d("LArSolutionSimpleClusterMerging",        SolutionSimpleClusterMergingAlgorithm)                                          \
+    d("LArSolutionSimpleClusterSplitting",      SolutionSimpleClusterSplittingAlgorithm)                                        \
+    d("LArSolutionLight",                       SolutionLightAlgorithm)                                                         \
+    d("LArSolutionLightClustering",             SolutionLightClusteringAlgorithm)                                               \
+    d("LArSolutionChargeLightMatching",         SolutionChargeLightMatchingAlgorithm)
 
 #define LAR_ALGORITHM_TOOL_LIST(d)                                                                                              \
     d("LArEventValidationTool",                 EventValidationTool)                                                            \

@@ -71,6 +71,7 @@ set(LAR_CONTENT_SRCS
     larpandoracontent/LArMonitoring/EventValidationBaseAlgorithm.cc
     larpandoracontent/LArMonitoring/HierarchyMonitoringAlgorithm.cc
     larpandoracontent/LArMonitoring/HierarchyValidationAlgorithm.cc
+    larpandoracontent/LArMonitoring/LightClusterVisualisationAlgorithm.cc
     larpandoracontent/LArMonitoring/MCParticleMonitoringAlgorithm.cc
     larpandoracontent/LArMonitoring/MuonLeadingEventValidationAlgorithm.cc
     larpandoracontent/LArMonitoring/NeutrinoEventValidationAlgorithm.cc
@@ -120,6 +121,13 @@ set(LAR_CONTENT_SRCS
     larpandoracontent/LArShowerRefinement/ProtoShowerMatchingTool.cc
     larpandoracontent/LArShowerRefinement/ShowerSpineFinderTool.cc
     larpandoracontent/LArShowerRefinement/ShowerStartFinderTool.cc
+    larpandoracontent/LArSolutions/SolutionExampleAlgorithm.cc
+    larpandoracontent/LArSolutions/SolutionSimpleClusterCreationAlgorithm.cc
+    larpandoracontent/LArSolutions/SolutionSimpleClusterMergingAlgorithm.cc
+    larpandoracontent/LArSolutions/SolutionSimpleClusterSplittingAlgorithm.cc
+    larpandoracontent/LArSolutions/SolutionLightAlgorithm.cc
+    larpandoracontent/LArSolutions/SolutionLightClusteringAlgorithm.cc    
+    larpandoracontent/LArSolutions/SolutionChargeLightMatchingAlgorithm.cc    
     larpandoracontent/LArThreeDReco/LArCosmicRay/AmbiguousDeltaRayTool.cc
     larpandoracontent/LArThreeDReco/LArCosmicRay/CosmicRayBaseMatchingAlgorithm.cc
     larpandoracontent/LArThreeDReco/LArCosmicRay/CosmicRayRemovalTool.cc
