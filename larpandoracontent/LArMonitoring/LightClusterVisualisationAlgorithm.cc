@@ -46,6 +46,9 @@ StatusCode LightClusterVisualisationAlgorithm::Run()
         return meanTime1 < meanTime2;
     });
 
+    const MCParticleList *pMCParticleList(nullptr);
+    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, "Input", pMCParticleList));
+
     for (const Cluster *const pOpCluster : pOpClusters)
     {
         const float clusterT0(this->GetClusterT0(pOpCluster));
@@ -73,26 +76,28 @@ StatusCode LightClusterVisualisationAlgorithm::Run()
             const CartesianVector pos(pOpHit->GetPositionVector());
             const float magnitudeLength(pOpHit->GetInputEnergy() * m_opticalMagnitudeScale);
             const int markerSize(static_cast<int>(std::ceil(magnitudeLength)));
+
+            if (markerSize == 0)
+                continue;
+            
             PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &pos, ("Optical Hit - " + std::to_string(pOpHit->GetInputEnergy())), ORANGE, markerSize));
         }
-        
-        PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
-    }
-    
-    const MCParticleList *pMCParticleList(nullptr);
-    PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, "Input", pMCParticleList));
 
-    for (const MCParticle *const pMC : *pMCParticleList)
-    {
-        const LArMCParticle *const pLArMC(dynamic_cast<const LArMCParticle *>(pMC));
-        
-        if (!pLArMC)
-            return STATUS_CODE_INVALID_PARAMETER;
-        
-        CartesianPointVector trajPoints(pLArMC->GetTrajPoints());
-        for (const CartesianVector &point : trajPoints)
+        for (const MCParticle *const pMC : *pMCParticleList)
         {
-            PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &point, "MC Trajectory", BLUE, 2));
+            const LArMCParticle *const pLArMC(dynamic_cast<const LArMCParticle *>(pMC));
+            
+            if (!pLArMC)
+                return STATUS_CODE_INVALID_PARAMETER;
+
+            CartesianPointVector trajPoints(pLArMC->GetTrajPoints());
+            for (const CartesianVector &point : trajPoints)
+            {
+                if (point.GetMagnitude() < std::numeric_limits<float>::epsilon())
+                    continue;
+                
+                PANDORA_MONITORING_API(AddMarkerToVisualization(this->GetPandora(), &point, "MC Trajectory", BLUE, 2));
+            }        
         }        
         
         PANDORA_MONITORING_API(ViewEvent(this->GetPandora()));
@@ -131,7 +136,7 @@ StatusCode LightClusterVisualisationAlgorithm::ReadSettings([[maybe_unused]] con
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "OpticalMagnitudeScale", m_opticalMagnitudeScale));
 
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "MinT", m_minT));
-    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "MinT", m_minT));
+    PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "MaxT", m_maxT));
     PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "MinClusterHits", m_minClusterHits));
 
     
