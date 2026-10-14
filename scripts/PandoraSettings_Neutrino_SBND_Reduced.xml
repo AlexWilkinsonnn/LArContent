@@ -1,0 +1,35 @@
+<pandora>
+    <!-- GLOBAL SETTINGS -->
+    <IsMonitoringEnabled>true</IsMonitoringEnabled>
+    <ShouldDisplayAlgorithmInfo>false</ShouldDisplayAlgorithmInfo>
+    <SingleHitTypeClusteringMode>true</SingleHitTypeClusteringMode>
+
+    <!-- ALGORITHM SETTINGS -->
+    <algorithm type = "LArPreProcessing">
+        <OutputCaloHitListNameU>CaloHitListU</OutputCaloHitListNameU>
+        <OutputCaloHitListNameV>CaloHitListV</OutputCaloHitListNameV>
+        <OutputCaloHitListNameW>CaloHitListW</OutputCaloHitListNameW>
+        <FilteredCaloHitListName>CaloHitList2D</FilteredCaloHitListName>
+        <CurrentCaloHitListReplacement>CaloHitList2D</CurrentCaloHitListReplacement>
+    </algorithm>
+
+    <algorithm type = "LArTutorialClustering">
+        <CaloHitListName>CaloHitListW</CaloHitListName>
+        <OutputClusterListName>ClustersW</OutputClusterListName>
+    </algorithm>
+
+    <algorithm type = "LArVisualMonitoring">
+        <ClusterListNames>ClustersW</ClusterListNames>
+        <ShowDetector>false</ShowDetector>
+    </algorithm>
+
+    <algorithm type = "LArTutorialClusterMerging">
+        <InputClusterListName>ClustersW</InputClusterListName>
+        <OutputClusterListName>ClustersW</OutputClusterListName>
+    </algorithm>
+
+    <algorithm type = "LArVisualMonitoring">
+        <ClusterListNames>ClustersW</ClusterListNames>
+        <ShowDetector>false</ShowDetector>
+    </algorithm>
+</pandora>
