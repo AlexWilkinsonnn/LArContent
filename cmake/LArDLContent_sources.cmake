@@ -13,6 +13,7 @@ set(LAR_DL_CONTENT_SRCS
     larpandoradlcontent/LArThreeDReco/LArEventBuilding/DLLaterTierHierarchyTool.cc
     larpandoradlcontent/LArThreeDReco/LArEventBuilding/DLNeutrinoHierarchyAlgorithm.cc
     larpandoradlcontent/LArThreeDReco/LArEventBuilding/DLPrimaryHierarchyTool.cc
+    larpandoradlcontent/LArThreeDReco/LArMatching/DLThreeDMatchingAlgorithm.cc
     larpandoradlcontent/LArTrackShowerId/DlClusterCharacterisationAlgorithm.cc
     larpandoradlcontent/LArTrackShowerId/DlHitTrackShowerIdAlgorithm.cc
     larpandoradlcontent/LArTrackShowerId/DlPfoCharacterisationAlgorithm.cc

@@ -21,6 +21,7 @@
 #include "larpandoradlcontent/LArThreeDReco/LArEventBuilding/DLLaterTierHierarchyTool.h"
 #include "larpandoradlcontent/LArThreeDReco/LArEventBuilding/DLNeutrinoHierarchyAlgorithm.h"
 #include "larpandoradlcontent/LArThreeDReco/LArEventBuilding/DLPrimaryHierarchyTool.h"
+#include "larpandoradlcontent/LArThreeDReco/LArMatching/DLThreeDMatchingAlgorithm.h"
 #include "larpandoradlcontent/LArTrackShowerId/DlClusterCharacterisationAlgorithm.h"
 #include "larpandoradlcontent/LArTrackShowerId/DlHitTrackShowerIdAlgorithm.h"
 #include "larpandoradlcontent/LArTrackShowerId/DlPfoCharacterisationAlgorithm.h"
@@ -47,7 +48,8 @@
     d("LArDLTrackShowerStreamSelection", DlTrackShowerStreamSelectionAlgorithm)                       \
     d("LArDLVertexing",                  DlVertexingAlgorithm)                                        \
     d("LArCNNTrackShowerCounting",       CNNTrackShowerCountingAlgorithm)                             \
-    d("LArDLTwoDShowerGrowing",          DLTwoDShowerGrowingAlgorithm)
+    d("LArDLTwoDShowerGrowing",          DLTwoDShowerGrowingAlgorithm)                                \
+    d("LArDLThreeDMatching",             DLThreeDMatchingAlgorithm)
 
 #define LAR_DL_ALGORITHM_TOOL_LIST(d)                                                                                                     \
     d("LArDLCheatHierarchy",                    DLCheatHierarchyTool)                                                                     \
