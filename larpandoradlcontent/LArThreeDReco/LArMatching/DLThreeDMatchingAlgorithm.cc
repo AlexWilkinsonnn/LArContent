@@ -365,7 +365,7 @@ StatusCode DLThreeDMatchingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
     {
         const LArGeometryHelper::DetectorBoundaries detBounds{LArGeometryHelper::GetDetectorBoundaries(this->GetPandora())};
         double xLow{static_cast<double>(detBounds.m_xBoundaries.first)}, xHigh{static_cast<double>(detBounds.m_xBoundaries.second)};
-        double yLow{static_cast<double>(detBounds.m_yBoundaries.first)}, yHigh{static_cast<double>(detBounds.m_yBoundaries.second)};
+        // double yLow{static_cast<double>(detBounds.m_yBoundaries.first)}, yHigh{static_cast<double>(detBounds.m_yBoundaries.second)};
         double zLow{static_cast<double>(detBounds.m_zBoundaries.first)}, zHigh{static_cast<double>(detBounds.m_zBoundaries.second)};
         m_polarRScaleFactor = static_cast<float>(1. / std::sqrt(std::pow(xHigh - xLow, 2.) + std::pow(zHigh - zLow, 2.)));
         m_cartesianXScaleFactor = static_cast<float>(1. / (xHigh - xLow));
