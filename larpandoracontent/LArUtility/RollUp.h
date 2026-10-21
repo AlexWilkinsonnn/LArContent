@@ -168,6 +168,15 @@ public:
      */
     const pandora::MCParticle *RollUpCaloHit(const pandora::CaloHit *const pCaloHit) const;
 
+    /**
+     *  @brief  Get the rolled-up MC particle weight map for a calo hit 
+     *
+     *  @param[in]  pCaloHit  the input calo hit
+     *
+     *  @return  the rolled-up MC particle weight map
+     */
+    const pandora::MCParticleWeightMap GetRolledUpMCParticleWeightMap(const pandora::CaloHit *const pCaloHit) const;
+
 private:
     std::unique_ptr<IRollUpPolicy> m_policy;                                                        ///< The roll-up policy
     mutable std::unordered_map<const pandora::MCParticle *, const pandora::MCParticle *> m_mcCache; ///< Per-event cache of MC roll-up results

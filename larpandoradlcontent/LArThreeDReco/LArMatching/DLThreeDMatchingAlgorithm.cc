@@ -8,6 +8,10 @@
 
 #include <torch/torch.h>
 
+#include "Geometry/LArReadoutVolume.h"
+#include "Geometry/LArReadoutUnit.h"
+#include "Geometry/LArReadoutChannel.h"
+
 #include "larpandoradlcontent/LArThreeDReco/LArMatching/DLThreeDMatchingAlgorithm.h"
 
 #include "larpandoracontent/LArHelpers/LArClusterHelper.h"
@@ -31,6 +35,12 @@ DLThreeDMatchingAlgorithm::HitFeatures::HitFeatures() :
     m_distToXGap{0.f},
     m_xWidth{0.f},
     m_energy{0.f},
+    m_uMinZRel{0.f},
+    m_uMaxZRel{0.f},
+    m_vMinZRel{0.f},
+    m_vMaxZRel{0.f},
+    m_wMinZRel{0.f},
+    m_wMaxZRel{0.f},
     m_larTpcVolId{0},
     m_daughterVolId{0}
 {
@@ -87,20 +97,21 @@ StatusCode DLThreeDMatchingAlgorithm::PrepareTrainingSample() const
     int currClusterID{0}, currMCID{0};
     std::map<const MCParticle *const, int> mcToID = {{nullptr, -1}}; // Initialise for null MCParticle
     std::vector<int> clusterView, clusterID;
-    std::vector<int> mcID = {-1}, mcPDG = {0}, mcIsFromBeam = {0}; // Initialise for null MCParticle
+    std::vector<int> mcID = {-1}, mcPDG = {0}, mcIsFromBeam = {0}, mcProcess = {0}; // Initialise for null MCParticle
     std::vector<int> hitClusterID;
     std::vector<float> hitXRelPos, hitZRelPos;
     std::vector<float> hitRRelPos, hitSinThetaRelPos, hitCosThetaRelPos; // Polar coordinates
     std::vector<float> hitXWidth;
     std::vector<float> hitDistToXGap;
     std::vector<float> hitEnergy;
+    std::vector<float> hitUMinZRel, hitUMaxZRel, hitVMinZRel, hitVMaxZRel, hitWMinZRel, hitWMaxZRel;
     std::vector<int> hitMCID;
+    std::vector<float> hitMCWeight;
     std::vector<int> hitLArTPCVolID, hitDaughterVolID;
 
     for (const Cluster *const pCluster : clusterList)
     {
-        const HitType view{LArClusterHelper::GetClusterHitType(pCluster)};
-        clusterView.emplace_back(static_cast<int>(view));
+        clusterView.emplace_back(static_cast<int>(LArClusterHelper::GetClusterHitType(pCluster)));
         clusterID.emplace_back(currClusterID);
 
         CaloHitList clusterCaloHits;
@@ -108,7 +119,7 @@ StatusCode DLThreeDMatchingAlgorithm::PrepareTrainingSample() const
         for (const CaloHit *const pCaloHit : clusterCaloHits)
         {
             HitFeatures hitFeatures;
-            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CalculateHitFeatures(pCaloHit, viewToVtxPos.at(view), hitFeatures));
+            PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->CalculateHitFeatures(pCaloHit, viewToVtxPos, hitFeatures));
 
             const MCParticle *const pMainMC{m_rollUpper.RollUpCaloHit(pCaloHit)};
             if (mcToID.find(pMainMC) == mcToID.end())
@@ -116,9 +127,14 @@ StatusCode DLThreeDMatchingAlgorithm::PrepareTrainingSample() const
                 mcToID.insert({pMainMC, currMCID++});
                 mcID.emplace_back(mcToID.at(pMainMC));
                 mcPDG.emplace_back(pMainMC->GetParticleId());
+
                 const MCParticle *const pMainMCParent{LArMCParticleHelper::GetParentMCParticle(pMainMC)};
                 mcIsFromBeam.emplace_back(
                     (LArMCParticleHelper::IsBeamParticle(pMainMCParent) || LArMCParticleHelper::IsNeutrino(pMainMCParent)) ? 1 : 0);
+
+                const LArMCParticle *pLArMainMC{dynamic_cast<const LArMCParticle *>(pMainMC)};
+                PANDORA_RETURN_IF(STATUS_CODE_NOT_FOUND, !pLArMainMC);
+                mcProcess.emplace_back(pLArMainMC->GetProcess());
             }
 
             hitClusterID.emplace_back(currClusterID);
@@ -131,10 +147,20 @@ StatusCode DLThreeDMatchingAlgorithm::PrepareTrainingSample() const
             hitXWidth.emplace_back(hitFeatures.m_xWidth);
             hitDistToXGap.emplace_back(hitFeatures.m_distToXGap);
             hitEnergy.emplace_back(hitFeatures.m_energy);
+            hitUMinZRel.emplace_back(hitFeatures.m_uMinZRel);
+            hitUMaxZRel.emplace_back(hitFeatures.m_uMaxZRel);
+            hitVMinZRel.emplace_back(hitFeatures.m_vMinZRel);
+            hitVMaxZRel.emplace_back(hitFeatures.m_vMaxZRel);
+            hitWMinZRel.emplace_back(hitFeatures.m_wMinZRel);
+            hitWMaxZRel.emplace_back(hitFeatures.m_wMaxZRel);
             hitLArTPCVolID.emplace_back(static_cast<int>(hitFeatures.m_larTpcVolId));
             hitDaughterVolID.emplace_back(static_cast<int>(hitFeatures.m_daughterVolId));
 
             hitMCID.emplace_back(mcToID.at(pMainMC));
+
+            const MCParticleWeightMap weightMap{m_rollUpper.GetRolledUpMCParticleWeightMap(pCaloHit)};
+            PANDORA_RETURN_IF(STATUS_CODE_NOT_ALLOWED, weightMap.empty() && pMainMC);
+            hitMCWeight.emplace_back(pMainMC ? weightMap.at(pMainMC) : 1.f);
         }
         currClusterID++;
     }
@@ -144,6 +170,7 @@ StatusCode DLThreeDMatchingAlgorithm::PrepareTrainingSample() const
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "mc_id", &mcID));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "mc_pdg", &mcPDG));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "mc_is_from_beam", &mcIsFromBeam));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "mc_process", &mcProcess));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_cluster_id", &hitClusterID));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_x_rel_pos", &hitXRelPos));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_z_rel_pos", &hitZRelPos));
@@ -153,7 +180,14 @@ StatusCode DLThreeDMatchingAlgorithm::PrepareTrainingSample() const
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_x_width", &hitXWidth));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_x_gap_dist", &hitDistToXGap));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_energy", &hitEnergy));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_u_min_z_rel_pos", &hitUMinZRel));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_u_max_z_rel_pos", &hitUMaxZRel));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_v_min_z_rel_pos", &hitVMinZRel));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_v_max_z_rel_pos", &hitVMaxZRel));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_w_min_z_rel_pos", &hitWMinZRel));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_w_max_z_rel_pos", &hitWMaxZRel));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_mc_id", &hitMCID));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_mc_weight", &hitMCWeight));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_tpc_vol_id", &hitLArTPCVolID));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_daughter_vol_id", &hitDaughterVolID));
 
@@ -222,12 +256,13 @@ StatusCode DLThreeDMatchingAlgorithm::GetClusters(const std::string clusterListN
 //-----------------------------------------------------------------------------------------------------------------------------------------
 
 StatusCode DLThreeDMatchingAlgorithm::CalculateHitFeatures(
-    const CaloHit *const pCaloHit, CartesianVector vtxPos, HitFeatures &hitFeatures) const
+    const CaloHit *const pCaloHit, const std::map<HitType, CartesianVector> &viewToVtxPos, HitFeatures &hitFeatures) const
 {
+    const HitType view{pCaloHit->GetHitType()};
     const double x{static_cast<double>(pCaloHit->GetPositionVector().GetX())};
-    const double xRel{x - static_cast<double>(vtxPos.GetX())};
+    const double xRel{x - static_cast<double>(viewToVtxPos.at(view).GetX())};
     const double z{static_cast<double>(pCaloHit->GetPositionVector().GetZ())};
-    const double zRel{z - static_cast<double>(vtxPos.GetZ())};
+    const double zRel{z - static_cast<double>(viewToVtxPos.at(view).GetZ())};
 
     const double rRel{std::sqrt(pow(xRel, 2.) + pow(zRel, 2.))};
     const double cosThetaRel{rRel != 0. ? xRel / rRel : 0.};
@@ -238,9 +273,7 @@ StatusCode DLThreeDMatchingAlgorithm::CalculateHitFeatures(
     {
         const double dist{x - xGap};
         if (std::abs(dist) < std::abs(distToXGap))
-        {
             distToXGap = dist;
-        }
     }
 
     hitFeatures.m_xRel = static_cast<float>(xRel);
@@ -253,9 +286,49 @@ StatusCode DLThreeDMatchingAlgorithm::CalculateHitFeatures(
     hitFeatures.m_energy = pCaloHit->GetMipEquivalentEnergy();
 
     const LArCaloHit *const pLArCaloHit(dynamic_cast<const LArCaloHit *>(pCaloHit));
-    PANDORA_RETURN_IF(STATUS_CODE_FAILURE, !pCaloHit);
+    PANDORA_RETURN_IF(STATUS_CODE_FAILURE, !pLArCaloHit);
     hitFeatures.m_larTpcVolId = pLArCaloHit->GetLArTPCVolumeId();
     hitFeatures.m_daughterVolId = pLArCaloHit->GetDaughterVolumeId();
+
+    const LArReadoutVolume &readoutVol{LArGeometryHelper::GetReadoutVolume(this->GetPandora(), *pLArCaloHit)};
+    const LArReadoutChannel &readoutCh{LArGeometryHelper::GetReadoutChannel(this->GetPandora(), *pLArCaloHit)};
+    
+    for (const LArReadoutUnit &readoutUnit : readoutVol.GetReadoutUnits())
+    {
+        // The channel intervals only cover the other views, in the hit's own view the interval is just the hit's channel
+        const HitType unitView{readoutUnit.GetView()};
+        const LArReadoutChannel::ChannelInterval chInterval{unitView == view
+                ? LArReadoutChannel::ChannelInterval{pLArCaloHit->GetChannelId(), pLArCaloHit->GetChannelId()}
+                : readoutCh.GetChannelInterval(unitView)};
+        const unsigned int chLo{chInterval.first}, chHi{chInterval.second};
+        const float zLo{readoutUnit.GetReferenceCoordinate() + readoutUnit.GetPitch() * (static_cast<float>(chLo) - 0.5f)};
+        const float zHi{readoutUnit.GetReferenceCoordinate() + readoutUnit.GetPitch() * (static_cast<float>(chHi) + 0.5f)};
+
+        // The pitch is signed, so zLo is not necessarily the lower bound
+        const float vtxZ{viewToVtxPos.at(unitView).GetZ()};
+        const float minZRel{std::min(zLo, zHi) - vtxZ};
+        const float maxZRel{std::max(zLo, zHi) - vtxZ};
+
+        PANDORA_RETURN_IF(STATUS_CODE_OUT_OF_RANGE, unitView == view && (zRel < minZRel || zRel > maxZRel)); // Sanity check
+
+        switch (unitView)
+        {
+            case TPC_VIEW_U:
+                hitFeatures.m_uMinZRel = minZRel;
+                hitFeatures.m_uMaxZRel = maxZRel;
+                break;
+            case TPC_VIEW_V:
+                hitFeatures.m_vMinZRel = minZRel;
+                hitFeatures.m_vMaxZRel = maxZRel;
+                break;
+            case TPC_VIEW_W:
+                hitFeatures.m_wMinZRel = minZRel;
+                hitFeatures.m_wMaxZRel = maxZRel;
+                break;
+            default:
+                return STATUS_CODE_INVALID_PARAMETER;
+        }
+    }
 
     return STATUS_CODE_SUCCESS;
 }
@@ -280,7 +353,7 @@ StatusCode DLThreeDMatchingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
         const std::map<HitType, float> lengthThresholds{{TPC_VIEW_U, LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_U)},
             {TPC_VIEW_V, LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_V)},
             {TPC_VIEW_W, LArGeometryHelper::GetWirePitch(this->GetPandora(), TPC_VIEW_W)}};
-        m_rollUpper = RollUpper(std::make_unique<RollUpEMAndAmbiguousDeltaRayHitsPolicy>(0.f, lengthThresholds));
+        m_rollUpper = RollUpper(std::make_unique<RollUpEMWithComptonFilterAndAmbiguousDeltaRayHitsPolicy>(0.f, lengthThresholds));
     }
 
     PANDORA_RETURN_RESULT_IF_AND_IF(

@@ -36,6 +36,12 @@ private:
         float m_distToXGap;
         float m_xWidth;
         float m_energy;
+        float m_uMinZRel;
+        float m_uMaxZRel;
+        float m_vMinZRel;
+        float m_vMaxZRel;
+        float m_wMinZRel;
+        float m_wMaxZRel;
         unsigned int m_larTpcVolId;
         unsigned int m_daughterVolId;
     };
@@ -102,12 +108,13 @@ private:
     /**
      *  @brief Calculate all properties of a hit relevant for constructing the hit feature vector.
      *
-     *  @param[in]  pCaloHit    The hit
-     *  @param[in]  vtxPos      The position of the 2D neutrino vertex associated with the hit
-     *  @param[out] hitFeatures Struct to store calculated hit properties
+     *  @param[in]  pCaloHit     The hit
+     *  @param[in]  viewToVtxPos The 3D neutrino vertex projected onto each view
+     *  @param[out] hitFeatures  Struct to store calculated hit properties
      */
     pandora::StatusCode CalculateHitFeatures(
-        const pandora::CaloHit *const pCaloHit, const pandora::CartesianVector vtxPos, HitFeatures &hitFeatures) const;
+        const pandora::CaloHit *const pCaloHit, const std::map<pandora::HitType, pandora::CartesianVector> &viewToVtxPos,
+        HitFeatures &hitFeatures) const;
 
     /* End general helpers */
 

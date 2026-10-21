@@ -54,10 +54,7 @@ const MCParticle *RollUpper::RollUpCaloHit(const CaloHit *const pCaloHit) const
 {
     if (m_caloHitCache.find(pCaloHit) == m_caloHitCache.end())
     {
-        const MCParticleWeightMap &weightMap{pCaloHit->GetMCParticleWeightMap()};
-        MCParticleWeightMap rolledUpWeightMap;
-        for (const auto &[pMC, weight] : weightMap)
-            rolledUpWeightMap[this->RollUpMC(pMC)] += weight;
+        const MCParticleWeightMap rolledUpWeightMap{this->GetRolledUpMCParticleWeightMap(pCaloHit)};
 
         const MCParticle *pMainMC{nullptr};
         float maxWeight{0.f};
@@ -82,6 +79,17 @@ const MCParticle *RollUpper::RollUpCaloHit(const CaloHit *const pCaloHit) const
     }
 
     return m_caloHitCache.at(pCaloHit);
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+const MCParticleWeightMap RollUpper::GetRolledUpMCParticleWeightMap(const CaloHit *const pCaloHit) const
+{
+    const MCParticleWeightMap &weightMap{pCaloHit->GetMCParticleWeightMap()};
+    MCParticleWeightMap rolledUpWeightMap;
+    for (const auto &[pMC, weight] : weightMap)
+        rolledUpWeightMap[this->RollUpMC(pMC)] += weight;
+    return rolledUpWeightMap;
 }
 
 //-----------------------------------------------------------------------------------------------------------------------------------------
