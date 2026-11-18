@@ -97,7 +97,8 @@ StatusCode DLThreeDMatchingAlgorithm::PrepareTrainingSample() const
     int currClusterID{0}, currMCID{0};
     std::map<const MCParticle *const, int> mcToID = {{nullptr, -1}}; // Initialise for null MCParticle
     std::vector<int> clusterView, clusterID;
-    std::vector<int> mcID = {-1}, mcPDG = {0}, mcIsFromBeam = {0}, mcProcess = {0}; // Initialise for null MCParticle
+    std::vector<int> mcID = {-1}, mcPDG = {0}, mcIsFromBeam = {0}, mcProcess = {static_cast<int>(MC_PROC_UNKNOWN)}; // Initialise for null MCParticle
+    std::vector<int> mcParentPDG = {0}, mcParentProcess = {static_cast<int>(MC_PROC_UNKNOWN)}; // Initialise for null MCParticle
     std::vector<int> hitClusterID;
     std::vector<float> hitXRelPos, hitZRelPos;
     std::vector<float> hitRRelPos, hitSinThetaRelPos, hitCosThetaRelPos; // Polar coordinates
@@ -128,13 +129,27 @@ StatusCode DLThreeDMatchingAlgorithm::PrepareTrainingSample() const
                 mcID.emplace_back(mcToID.at(pMainMC));
                 mcPDG.emplace_back(pMainMC->GetParticleId());
 
-                const MCParticle *const pMainMCParent{LArMCParticleHelper::GetParentMCParticle(pMainMC)};
+                const MCParticle *const pMainMCRoot{LArMCParticleHelper::GetParentMCParticle(pMainMC)};
                 mcIsFromBeam.emplace_back(
-                    (LArMCParticleHelper::IsBeamParticle(pMainMCParent) || LArMCParticleHelper::IsNeutrino(pMainMCParent)) ? 1 : 0);
+                    (LArMCParticleHelper::IsBeamParticle(pMainMCRoot) || LArMCParticleHelper::IsNeutrino(pMainMCRoot)) ? 1 : 0);
 
                 const LArMCParticle *pLArMainMC{dynamic_cast<const LArMCParticle *>(pMainMC)};
                 PANDORA_RETURN_IF(STATUS_CODE_NOT_FOUND, !pLArMainMC);
                 mcProcess.emplace_back(pLArMainMC->GetProcess());
+
+                if (pMainMC->IsRootParticle()) // Not sure if this is possible, maybe in test beam case?
+                {
+                    mcParentPDG.emplace_back(0);
+                    mcParentProcess.emplace_back(static_cast<int>(MC_PROC_UNKNOWN));
+                }
+                else
+                {
+                    const MCParticle *const pMainMCParent{LArMCParticleHelper::GetNextParentMCParticle(pMainMC)};
+                    const LArMCParticle *const pLArMainMCParent{dynamic_cast<const LArMCParticle *>(pMainMCParent)};
+                    PANDORA_RETURN_IF(STATUS_CODE_NOT_FOUND, !pLArMainMCParent);
+                    mcParentPDG.emplace_back(pMainMCParent->GetParticleId());
+                    mcParentProcess.emplace_back(pLArMainMCParent->GetProcess());
+                }
             }
 
             hitClusterID.emplace_back(currClusterID);
@@ -171,6 +186,8 @@ StatusCode DLThreeDMatchingAlgorithm::PrepareTrainingSample() const
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "mc_pdg", &mcPDG));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "mc_is_from_beam", &mcIsFromBeam));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "mc_process", &mcProcess));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "mc_parent_pdg", &mcParentPDG));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "mc_parent_process", &mcParentProcess));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_cluster_id", &hitClusterID));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_x_rel_pos", &hitXRelPos));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_z_rel_pos", &hitZRelPos));
@@ -190,6 +207,13 @@ StatusCode DLThreeDMatchingAlgorithm::PrepareTrainingSample() const
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_mc_weight", &hitMCWeight));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_tpc_vol_id", &hitLArTPCVolID));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "hit_daughter_vol_id", &hitDaughterVolID));
+
+    std::vector<int> clusterPfoID; // Needs to live until the FillTree call
+    if (!m_pfoListNames.empty())
+    {
+        PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, this->GetClusterPfoIDs(clusterList, clusterPfoID));
+        PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_trainingTreeName, "cluster_pfo_id", &clusterPfoID));
+    }
 
     PANDORA_MONITORING_API(FillTree(this->GetPandora(), m_trainingTreeName));
 
@@ -250,6 +274,42 @@ StatusCode DLThreeDMatchingAlgorithm::GetClusters(const std::string clusterListN
     const ClusterList *pClusterList{nullptr};
     PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::GetList(*this, clusterListName, pClusterList));
     clusterList.insert(clusterList.end(), pClusterList->begin(), pClusterList->end());
+    return STATUS_CODE_SUCCESS;
+}
+
+//-----------------------------------------------------------------------------------------------------------------------------------------
+
+StatusCode DLThreeDMatchingAlgorithm::GetClusterPfoIDs(const ClusterList &clusterList, std::vector<int> &clusterPfoID) const
+{
+    std::map<const Cluster *, int> clusterToPfoID;
+    int currPfoID{0};
+    for (const std::string &listName : m_pfoListNames)
+    {
+        const PfoList *pPfoList{nullptr};
+        PANDORA_RETURN_RESULT_IF_AND_IF(STATUS_CODE_SUCCESS, STATUS_CODE_NOT_INITIALIZED, !=,
+            PandoraContentApi::GetList(*this, listName, pPfoList));
+        if (!pPfoList)
+            continue;
+
+        for (const ParticleFlowObject *const pPfo : *pPfoList)
+        {
+            for (const Cluster *const pCluster : pPfo->GetClusterList())
+            {
+                PANDORA_RETURN_IF(STATUS_CODE_ALREADY_PRESENT, clusterToPfoID.find(pCluster) != clusterToPfoID.end());
+                clusterToPfoID.insert({pCluster, currPfoID});
+            }
+            currPfoID++;
+        }
+    }
+
+    for (const Cluster *const pCluster : clusterList)
+    {
+        if (clusterToPfoID.find(pCluster) == clusterToPfoID.end())
+            clusterPfoID.emplace_back(-1);
+        else
+            clusterPfoID.emplace_back(clusterToPfoID.at(pCluster));
+    }
+
     return STATUS_CODE_SUCCESS;
 }
 
@@ -360,6 +420,8 @@ StatusCode DLThreeDMatchingAlgorithm::ReadSettings(const TiXmlHandle xmlHandle)
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "ClusterListNames", m_clusterListNames));
     PANDORA_RETURN_RESULT_IF_AND_IF(
         STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadValue(xmlHandle, "VertexListName", m_vertexListName));
+    PANDORA_RETURN_RESULT_IF_AND_IF(
+        STATUS_CODE_SUCCESS, STATUS_CODE_NOT_FOUND, !=, XmlHelper::ReadVectorOfValues(xmlHandle, "PfoListNames", m_pfoListNames));
 
     if (m_trainingMode)
     {

@@ -106,6 +106,15 @@ private:
     pandora::StatusCode GetClusters(const std::string clusterListName, pandora::ClusterList &clusterList) const;
 
     /**
+     *  @brief Label each cluster by the index of the pfo containing it, -1 if not in a pfo.
+     *         For comparing with the baseline matching.
+     *
+     *  @param[in]  clusterList  The clusters, in the same order as the cluster_id branch
+     *  @param[out] clusterPfoID The pfo index of each cluster
+     */
+    pandora::StatusCode GetClusterPfoIDs(const pandora::ClusterList &clusterList, std::vector<int> &clusterPfoID) const;
+
+    /**
      *  @brief Calculate all properties of a hit relevant for constructing the hit feature vector.
      *
      *  @param[in]  pCaloHit     The hit
@@ -143,6 +152,7 @@ private:
     std::string m_trainingFileName;           ///< File name for training data output
     pandora::StringVector m_clusterListNames; ///< Names of cluster lists
     std::string m_vertexListName;             ///< Name of vertex list
+    pandora::StringVector m_pfoListNames;     ///< Names of pfo lists, if set clusters are labelled by pfo (for baseline comparison)
 
     /* End configurable via xml members */
 };
